@@ -39,8 +39,8 @@ if ($_POST) {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="https://use.typekit.net/oqm2ymj.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <title>The Couple's Quest</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/aquawolf04/font-awesome-pro@5cd1511/css/all.css">
+    <title>The Couple's Quest - Travel Edition</title>
     <style>
         * {
             margin: 0;
@@ -224,7 +224,7 @@ if ($_POST) {
     <div class="animated-background" id="background"></div>
     <div class="container">
         <img class="gameLogo" src="logo.svg">
-        <h1>The Couple's Quest</h1>
+        <h1>Travel Edition</h1>
         
         <?php if (isset($error)): ?>
             <div class="error"><?= htmlspecialchars($error) ?></div>
@@ -257,7 +257,7 @@ if ($_POST) {
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
     <script>
         $(document).ready(function() {
-            const icons = ['fa-mars', 'fa-venus', 'fa-circle-arrow-up', 'fa-circle-question', 'fa-camera-retro', 'fa-hand-point-right', 'fa-pepper-hot'];
+            const icons = ['fa-mars', 'fa-venus', 'fa-flag-checkered', 'fa-star', 'fa-skull-crossbones', 'fa-swords', 'fa-camera-retro', 'fa-pepper-hot'];
             const $bg = $('#background');
             
             // Generate random icons
