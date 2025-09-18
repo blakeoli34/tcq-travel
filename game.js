@@ -859,257 +859,7 @@ function displayStatusEffects(containerId, effects) {
 // SCORE BUG SYSTEM
 // ========================================
 
-function setupFirebaseMessaging() {
-    if (!firebaseMessaging) return;
-    
-    const vapidKey = 'BAhDDY44EUfm9YKOElboy-2fb_6lzVhW4_TLMr4Ctiw6oA_ROcKZ09i5pKMQx3s7SoWgjuPbW-eGI7gFst6qjag';
-    
-    firebaseMessaging.getToken({ vapidKey }).then((currentToken) => {
-        if (currentToken) {
-            console.log('FCM Token received:', currentToken);
-            updateTokenOnServer(currentToken);
-            localStorage.setItem('fcm_token', currentToken);
-        }
-    }).catch((err) => {
-        console.log('Error getting FCM token:', err);
-    });
-
-    firebaseMessaging.onMessage((payload) => {
-        console.log('Message received in foreground:', payload);
-        
-        let title = payload.notification?.title || payload.data?.title || 'The Couples Quest';
-        let body = payload.notification?.body || payload.data?.body || 'New notification';
-        
-        showInAppNotification(title, body);
-    });
-}
-
-function updateTokenOnServer(token) {
-    fetch('game.php', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: 'action=update_fcm_token&fcm_token=' + encodeURIComponent(token)
-    })
-    .then(response => response.json())
-    .then(data => {
-        console.log('Token update result:', data);
-    })
-    .catch(error => {
-        console.error('Error updating token:', error);
-        setTimeout(() => updateTokenOnServer(token), 5000);
-    });
-}
-
-function checkNotificationStatus() {
-    const button = document.getElementById('enableNotificationsBtn');
-    const status = document.getElementById('notificationStatus');
-    
-    if (!button || !status) return;
-    
-    if (!('Notification' in window)) {
-        button.textContent = 'Not Supported';
-        button.disabled = true;
-        status.innerHTML = '<span style="color: #ff6b6b;">❌ Notifications not supported</span>';
-        return;
-    }
-    
-    if (Notification.permission === 'granted') {
-        button.textContent = 'Enabled ✓';
-        button.style.background = '#51cf66';
-        status.innerHTML = '<span style="color: #51cf66;">✅ Notifications are enabled</span>';
-        
-        if (firebaseMessaging) {
-            setupFirebaseMessaging();
-        }
-    } else if (Notification.permission === 'denied') {
-        button.textContent = 'Blocked';
-        status.innerHTML = '<span style="color: #ff6b6b;">❌ Notifications blocked in browser settings</span>';
-    } else {
-        button.textContent = 'Enable Notifications';
-        status.innerHTML = '<span style="color: #868e96;">Click to enable notifications</span>';
-    }
-}
-
-function checkNotificationStatusForModal() {
-    const status = document.getElementById('notificationModalStatus');
-    const statusText = document.getElementById('notificationModalStatusText');
-    const button = document.getElementById('enableNotificationsModalBtn');
-    const testButton = document.getElementById('testNotificationBtn');
-    
-    if (!status || !statusText || !button) return;
-    
-    if (!('Notification' in window)) {
-        statusText.textContent = '❌ Notifications not supported in this browser';
-        status.className = 'notification-status blocked';
-        button.textContent = 'Not Supported';
-        button.disabled = true;
-        return;
-    }
-    
-    if (Notification.permission === 'granted') {
-        statusText.textContent = '✅ Notifications are enabled!';
-        status.className = 'notification-status enabled';
-        button.textContent = 'Enabled ✓';
-        button.style.background = '#51cf66';
-        button.disabled = true;
-        
-        if (testButton) {
-            testButton.style.display = 'block';
-        }
-        
-        if (firebaseMessaging) {
-            setupFirebaseMessaging();
-        }
-    } else if (Notification.permission === 'denied') {
-        statusText.textContent = '❌ Notifications are blocked. Please enable in browser settings and refresh the page.';
-        status.className = 'notification-status blocked';
-        button.textContent = 'Blocked';
-        button.disabled = false;
-    } else {
-        statusText.textContent = 'Click below to enable notifications for this game.';
-        status.className = 'notification-status disabled';
-        button.textContent = 'Enable Notifications';
-        button.disabled = false;
-    }
-}
-
-function testNotification() {
-    fetch('game.php', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: 'action=test_notification'
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            alert('Test notification sent! Check your device.');
-        } else {
-            alert('Failed to send test notification: ' + (data.message || 'Unknown error'));
-        }
-    })
-    .catch(error => {
-        console.error('Error sending test notification:', error);
-        alert('Failed to send test notification.');
-    });
-}
-
-// ========================================
-// APP BADGE FUNCTIONALITY
-// ========================================
-
-let badgeSupported = false;
-
-function checkBadgeSupport() {
-    badgeSupported = 'setAppBadge' in navigator;
-    console.log('Badge support:', badgeSupported);
-}
-
-function updateAppBadge(count) {
-    if (!badgeSupported || !document.body.classList.contains('digital')) return;
-    
-    try {
-        if (count > 0) {
-            navigator.setAppBadge(count);
-        } else {
-            navigator.clearAppBadge();
-        }
-    } catch (error) {
-        console.log('Badge update failed:', error);
-    }
-}
-
-function clearAppBadge() {
-    if (badgeSupported) {
-        try {
-            navigator.clearAppBadge();
-        } catch (error) {
-            console.log('Badge clear failed:', error);
-        }
-    }
-}
-
-// ========================================
-// GLOBAL EVENT HANDLERS AND CLEANUP
-// ========================================
-
-// Check notification status on page load
-setTimeout(checkNotificationStatus, 500);
-
-// Service worker heartbeat
-if ('serviceWorker' in navigator) {
-    setInterval(() => {
-        navigator.serviceWorker.ready.then(registration => {
-            if (registration.active) {
-                registration.active.postMessage({type: 'HEARTBEAT'});
-            }
-        });
-    }, 30000);
-}
-
-// Cleanup on page unload
-window.addEventListener('beforeunload', () => {
-    // Clear any active intervals
-    if (window.gameIntervals) {
-        window.gameIntervals.forEach(interval => clearInterval(interval));
-    }
-});
-
-// ========================================
-// MAKE FUNCTIONS GLOBALLY AVAILABLE
-// ========================================
-
-// Core Travel Edition functions
-window.handleSlotInteraction = handleSlotInteraction;
-window.toggleHandOverlay = toggleHandOverlay;
-window.selectDeck = selectDeck;
-window.drawSnapCard = drawSnapCard;
-window.drawSpicyCard = drawSpicyCard;
-window.toggleScoreBugExpanded = toggleScoreBugExpanded;
-window.adjustScore = adjustScore;
-window.stealPoints = stealPoints;
-
-// Modal functions
-window.openNotifyModal = openNotifyModal;
-window.openTimerModal = openTimerModal;
-window.openHistoryModal = openHistoryModal;
-window.openEndGameModal = openEndGameModal;
-window.closeModal = closeModal;
-
-// Game action functions
-window.createTimer = createTimer;
-window.sendBump = sendBump;
-window.testNotification = testNotification;
-window.endGame = endGame;
-window.readyForNewGame = readyForNewGame;
-
-// Setup functions
-window.showCustomDatePicker = showCustomDatePicker;
-window.hideCustomDatePicker = hideCustomDatePicker;
-window.setCustomDuration = setCustomDuration;
-
-// Notification functions
-window.enableNotifications = enableNotifications;
-window.enableNotificationsFromModal = enableNotificationsFromModal;
-
-// Card action functions
-window.completeChallenge = completeChallenge;
-window.vetoChallenge = vetoChallenge;
-window.activateCurse = activateCurse;
-window.claimPower = claimPower;
-window.discardPower = discardPower;
-window.winBattle = winBattle;
-window.loseBattle = loseBattle;
-
-// Modal close functions
-window.closeSlotActions = closeSlotActions;
-window.closeHandCardActions = closeHandCardActions;
-
-// Hand card functions
-window.playPowerCard = playPowerCard;
-window.completeSnapCard = completeSnapCard;
-window.completeSpicyCard = completeSpicyCard;
-window.vetoSnapCard = vetoSnapCard;
-window.vetoSpicyCard = vetoSpicyCard;ScoreBugHandlers() {
+function setupScoreBugHandlers() {
     const scoreBug = document.getElementById('scoreBug');
     const scoreBugExpanded = document.getElementById('scoreBugExpanded');
     
@@ -1129,20 +879,20 @@ window.vetoSpicyCard = vetoSpicyCard;ScoreBugHandlers() {
 
 function toggleScoreBugExpanded() {
     const scoreBug = document.getElementById('scoreBug');
-    const scoreBugExpanded = document.getElementById('scoreBugExpanded');
+    const scoreBugExpandedEl = document.getElementById('scoreBugExpanded');
     const expandIcon = document.getElementById('expandIcon');
     
-    if (!scoreBug || !scoreBugExpanded) return;
+    if (!scoreBug || !scoreBugExpandedEl) return;
     
     scoreBugExpanded = !scoreBugExpanded;
     
     if (scoreBugExpanded) {
-        scoreBugExpanded.classList.add('active');
+        scoreBugExpandedEl.classList.add('active');
         expandIcon.className = 'fa-solid fa-chevron-down';
         loadAwardsInfo();
         setOverlayActive(true);
     } else {
-        scoreBugExpanded.classList.remove('active');
+        scoreBugExpandedEl.classList.remove('active');
         expandIcon.className = 'fa-solid fa-chevron-up';
         setOverlayActive(false);
     }
@@ -1863,6 +1613,175 @@ function initializeFirebase() {
     }
 }
 
+function setupFirebaseMessaging() {
+    if (!firebaseMessaging) return;
+    
+    const vapidKey = 'BAhDDY44EUfm9YKOElboy-2fb_6lzVhW4_TLMr4Ctiw6oA_ROcKZ09i5pKMQx3s7SoWgjuPbW-eGI7gFst6qjag';
+    
+    firebaseMessaging.getToken({ vapidKey }).then((currentToken) => {
+        if (currentToken) {
+            console.log('FCM Token received:', currentToken);
+            updateTokenOnServer(currentToken);
+            localStorage.setItem('fcm_token', currentToken);
+        }
+    }).catch((err) => {
+        console.log('Error getting FCM token:', err);
+    });
+
+    firebaseMessaging.onMessage((payload) => {
+        console.log('Message received in foreground:', payload);
+        
+        let title = payload.notification?.title || payload.data?.title || 'The Couples Quest';
+        let body = payload.notification?.body || payload.data?.body || 'New notification';
+        
+        showInAppNotification(title, body);
+    });
+}
+
+function updateTokenOnServer(token) {
+    fetch('game.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'action=update_fcm_token&fcm_token=' + encodeURIComponent(token)
+    })
+    .then(response => response.json())
+    .then(data => {
+        console.log('Token update result:', data);
+    })
+    .catch(error => {
+        console.error('Error updating token:', error);
+        setTimeout(() => updateTokenOnServer(token), 5000);
+    });
+}
+
+function checkNotificationStatus() {
+    const button = document.getElementById('enableNotificationsBtn');
+    const status = document.getElementById('notificationStatus');
+    
+    if (!button || !status) return;
+    
+    if (!('Notification' in window)) {
+        button.textContent = 'Not Supported';
+        button.disabled = true;
+        status.innerHTML = '<span style="color: #ff6b6b;">❌ Notifications not supported</span>';
+        return;
+    }
+    
+    if (Notification.permission === 'granted') {
+        button.textContent = 'Enabled ✓';
+        button.style.background = '#51cf66';
+        status.innerHTML = '<span style="color: #51cf66;">✅ Notifications are enabled</span>';
+        
+        if (firebaseMessaging) {
+            setupFirebaseMessaging();
+        }
+    } else if (Notification.permission === 'denied') {
+        button.textContent = 'Blocked';
+        status.innerHTML = '<span style="color: #ff6b6b;">❌ Notifications blocked in browser settings</span>';
+    } else {
+        button.textContent = 'Enable Notifications';
+        status.innerHTML = '<span style="color: #868e96;">Click to enable notifications</span>';
+    }
+}
+
+function checkNotificationStatusForModal() {
+    const status = document.getElementById('notificationModalStatus');
+    const statusText = document.getElementById('notificationModalStatusText');
+    const button = document.getElementById('enableNotificationsModalBtn');
+    const testButton = document.getElementById('testNotificationBtn');
+    
+    if (!status || !statusText || !button) return;
+    
+    if (!('Notification' in window)) {
+        statusText.textContent = '❌ Notifications not supported in this browser';
+        status.className = 'notification-status blocked';
+        button.textContent = 'Not Supported';
+        button.disabled = true;
+        return;
+    }
+    
+    if (Notification.permission === 'granted') {
+        statusText.textContent = '✅ Notifications are enabled!';
+        status.className = 'notification-status enabled';
+        button.textContent = 'Enabled ✓';
+        button.style.background = '#51cf66';
+        button.disabled = true;
+        
+        if (testButton) {
+            testButton.style.display = 'block';
+        }
+        
+        if (firebaseMessaging) {
+            setupFirebaseMessaging();
+        }
+    } else if (Notification.permission === 'denied') {
+        statusText.textContent = '❌ Notifications are blocked. Please enable in browser settings and refresh the page.';
+        status.className = 'notification-status blocked';
+        button.textContent = 'Blocked';
+        button.disabled = false;
+    } else {
+        statusText.textContent = 'Click below to enable notifications for this game.';
+        status.className = 'notification-status disabled';
+        button.textContent = 'Enable Notifications';
+        button.disabled = false;
+    }
+}
+
+function testNotification() {
+    fetch('game.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'action=test_notification'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('Test notification sent! Check your device.');
+        } else {
+            alert('Failed to send test notification: ' + (data.message || 'Unknown error'));
+        }
+    })
+    .catch(error => {
+        console.error('Error sending test notification:', error);
+        alert('Failed to send test notification.');
+    });
+}
+
+// ========================================
+// APP BADGE FUNCTIONALITY
+// ========================================
+
+let badgeSupported = false;
+
+function checkBadgeSupport() {
+    badgeSupported = 'setAppBadge' in navigator;
+    console.log('Badge support:', badgeSupported);
+}
+
+function updateAppBadge(count) {
+    if (!badgeSupported || !document.body.classList.contains('digital')) return;
+    
+    try {
+        if (count > 0) {
+            navigator.setAppBadge(count);
+        } else {
+            navigator.clearAppBadge();
+        }
+    } catch (error) {
+        console.log('Badge update failed:', error);
+    }
+}
+
+function clearAppBadge() {
+    if (badgeSupported) {
+        try {
+            navigator.clearAppBadge();
+        } catch (error) {
+            console.log('Badge clear failed:', error);
+        }
+    }
+}
+
 function enableNotifications() {
     const button = document.getElementById('enableNotificationsBtn');
     const status = document.getElementById('notificationStatus');
@@ -1964,6 +1883,36 @@ function enableNotificationsFromModal() {
         button.disabled = false;
     });
 }
+
+// ========================================
+// GLOBAL EVENT HANDLERS AND CLEANUP
+// ========================================
+
+// Check notification status on page load
+setTimeout(checkNotificationStatus, 500);
+
+// Service worker heartbeat
+if ('serviceWorker' in navigator) {
+    setInterval(() => {
+        navigator.serviceWorker.ready.then(registration => {
+            if (registration.active) {
+                registration.active.postMessage({type: 'HEARTBEAT'});
+            }
+        });
+    }, 30000);
+}
+
+// Cleanup on page unload
+window.addEventListener('beforeunload', () => {
+    // Clear any active intervals
+    if (window.gameIntervals) {
+        window.gameIntervals.forEach(interval => clearInterval(interval));
+    }
+});
+
+// ========================================
+// MAKE FUNCTIONS GLOBALLY AVAILABLE
+// ========================================
 
 // Core Travel Edition functions
 window.handleSlotInteraction = handleSlotInteraction;
