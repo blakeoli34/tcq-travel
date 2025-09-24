@@ -69,26 +69,6 @@ if ($timeRemaining) {
     $gameTimeText = 'Game Ended';
 }
 
-function getTodayTheme() {
-    try {
-        $pdo = Config::getDatabaseConnection();
-        $timezone = new DateTimeZone('America/Indiana/Indianapolis');
-        $today = (new DateTime('now', $timezone))->format('Y-m-d');
-        
-        $stmt = $pdo->prepare("
-            SELECT theme_class FROM scheduled_themes 
-            WHERE theme_date = ? 
-            ORDER BY id ASC 
-            LIMIT 1
-        ");
-        $stmt->execute([$today]);
-        return $stmt->fetchColumn();
-    } catch (Exception $e) {
-        error_log("Error getting today's theme: " . $e->getMessage());
-        return null;
-    }
-}
-
 // Handle AJAX requests
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     header('Content-Type: application/json');
@@ -367,6 +347,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $end = new DateTime($endDate);
             $today = new DateTime();
             $today->setTime(0, 0, 0);
+            $start->setTime(0, 0, 0);
             
             if ($start < $today) {
                 echo json_encode(['success' => false, 'message' => 'Start date cannot be in the past']);
@@ -459,7 +440,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             break;
             
         case 'get_game_data':
-            processExpiredTimers($player['game_id']);
             clearExpiredEffects($player['game_id']);
             
             $updatedPlayers = getGamePlayers($player['game_id']);
@@ -486,7 +466,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $gameId = $player['game_id'];
                 
                 // Get updated game info including mode
-                $stmt = $pdo->prepare("SELECT status, game_mode FROM games WHERE id = ?");
+                $stmt = $pdo->prepare("SELECT status, travel_mode_id FROM games WHERE id = ?");
                 $stmt->execute([$gameId]);
                 $gameInfo = $stmt->fetch();
                 
@@ -631,9 +611,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     <link rel="stylesheet" href="/game.css">
 </head>
 <body class="<?php 
-    if($player['gender'] === 'male') { echo 'male'; } else { echo 'female'; } 
-    $todayTheme = getTodayTheme();
-    if ($todayTheme) { echo ' ' . $todayTheme; }
+    if($player['gender'] === 'male') { echo 'male'; } else { echo 'female'; }
 ?>">
     <div class="container">
         <?php if ($gameStatus === 'waiting' && count($players) < 2): ?>
@@ -755,10 +733,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         <?php else: ?>
             <!-- Active Travel Edition Game -->
             <?php
-            if ($gameMode === 'digital') {
-                echo '<script>document.body.classList.add("digital");</script>';
-            }
-            
             if (!$currentPlayer || !$opponentPlayer) {
                 echo '<div style="color: red; padding: 20px;">Error: Could not identify players correctly. Please contact support.</div>';
                 exit;
@@ -837,8 +811,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             <div class="score-bug" id="scoreBug" onclick="toggleScoreBugExpanded()">
                 <div class="score-bug-content">
                     <div class="player-score-section opponent">
-                        <div class="player-name"><?= htmlspecialchars($opponentPlayer['first_name']) ?></div>
                         <div class="player-score"><?= $opponentPlayer['score'] ?></div>
+                        <div class="player-name"><?= htmlspecialchars($opponentPlayer['first_name']) ?></div>
                         <div class="status-effects opponent-effects" id="opponentStatusEffects">
                             <!-- Status effect icons will be added here -->
                         </div>
@@ -849,8 +823,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     </div>
                     
                     <div class="player-score-section current">
-                        <div class="player-name"><?= htmlspecialchars($currentPlayer['first_name']) ?></div>
                         <div class="player-score"><?= $currentPlayer['score'] ?></div>
+                        <div class="player-name"><?= htmlspecialchars($currentPlayer['first_name']) ?></div>
                         <div class="status-effects player-effects" id="playerStatusEffects">
                             <!-- Status effect icons will be added here -->
                         </div>

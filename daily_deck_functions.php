@@ -22,16 +22,16 @@ function generateDailyDeck($gameId) {
         if ($daysRemaining <= 0) {
             return ['success' => false, 'message' => 'Game has ended'];
         }
+
+        $pdo->beginTransaction();
         
         // Calculate cards needed for today's deck
         $cardsPerDay = calculateCardsPerDay($gameId, $daysRemaining);
         
         // Get available cards from master deck (exclude used cards)
         $usedCardIds = getUsedCardIds($gameId);
-        $placeholders = str_repeat('?,', count($usedCardIds) - 1) . '?';
+        $placeholders = !empty($usedCardIds) ? str_repeat('?,', count($usedCardIds) - 1) . '?' : '';
         $usedClause = !empty($usedCardIds) ? "AND c.id NOT IN ($placeholders)" : "";
-        
-        $pdo->beginTransaction();
         
         // Select challenge cards
         $challengeCards = selectRandomCards($gameId, 'challenge', $cardsPerDay['challenge'], $usedCardIds);
@@ -44,20 +44,25 @@ function generateDailyDeck($gameId) {
         
         // Select one battle card (required)
         $battleCards = selectRandomCards($gameId, 'battle', 1, $usedCardIds);
+
+        $stmt = $pdo->prepare("SELECT start_date FROM games WHERE id = ?");
+        $stmt->execute([$gameId]);
+        $gameStartDate = $stmt->fetchColumn();
         
         // Insert daily deck record
-        $stmt = $pdo->prepare("INSERT INTO daily_decks (game_id, deck_date, total_cards) VALUES (?, ?, ?)");
+        $stmt = $pdo->prepare("INSERT INTO daily_decks (game_id, deck_date, game_date, total_cards) VALUES (?, ?, ?, ?)");
         $totalCards = count($challengeCards) + count($curseCards) + count($powerCards) + count($battleCards);
-        $stmt->execute([$gameId, $today, $totalCards]);
+        $stmt->execute([$gameId, $today, $gameStartDate, $totalCards]);
         $deckId = $pdo->lastInsertId();
         
         // Insert deck slots (3 slots available)
         $allCards = array_merge($challengeCards, $curseCards, $powerCards, $battleCards);
         shuffle($allCards);
         
+        // Insert deck slots
         for ($slot = 1; $slot <= 3; $slot++) {
-            $stmt = $pdo->prepare("INSERT INTO daily_deck_slots (game_id, deck_date, slot_number) VALUES (?, ?, ?)");
-            $stmt->execute([$gameId, $today, $slot]);
+            $stmt = $pdo->prepare("INSERT INTO daily_deck_slots (game_id, deck_date, game_date, slot_number) VALUES (?, ?, ?, ?)");
+            $stmt->execute([$gameId, $today, $gameStartDate, $slot]);
         }
         
         // Store remaining cards for future draws
@@ -126,30 +131,30 @@ function selectRandomCards($gameId, $category, $count, $excludeIds = []) {
         $pdo = Config::getDatabaseConnection();
         
         $excludeClause = "";
-        $params = [$category];
+        $params = [$category, $gameId];
         
         if (!empty($excludeIds)) {
             $placeholders = str_repeat('?,', count($excludeIds) - 1) . '?';
-            $excludeClause = "AND id NOT IN ($placeholders)";
+            $excludeClause = "AND c.id NOT IN ($placeholders)";
             $params = array_merge($params, $excludeIds);
         }
         
-        $stmt = $pdo->prepare("
+        $sql = "
             SELECT c.* FROM cards c
             JOIN card_travel_modes ctm ON c.id = ctm.card_id
             JOIN games g ON g.travel_mode_id = ctm.mode_id
             WHERE c.card_category = ? AND g.id = ? $excludeClause
             ORDER BY RAND() 
             LIMIT ?
-        ");
-        $params = [$category, $gameId];
-        if (!empty($excludeIds)) {
-            $params = array_merge($params, $excludeIds);
-        }
+        ";
+        
+        $stmt = $pdo->prepare($sql);
         $params[] = $count;
         $stmt->execute($params);
         
-        return $stmt->fetchAll();
+        $result = $stmt->fetchAll();
+        
+        return $result;
         
     } catch (Exception $e) {
         error_log("Error selecting random cards: " . $e->getMessage());

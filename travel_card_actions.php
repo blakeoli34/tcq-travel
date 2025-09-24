@@ -46,7 +46,7 @@ function completeChallenge($gameId, $playerId, $slotNumber) {
         // Mark slot as completed
         $stmt = $pdo->prepare("
             UPDATE daily_deck_slots 
-            SET completed_at = NOW(), completed_by = ?
+            SET completed_at = NOW(), completed_by_player_id = ?
             WHERE game_id = ? AND deck_date = ? AND slot_number = ?
         ");
         $stmt->execute([$playerId, $gameId, $today, $slotNumber]);
@@ -213,7 +213,7 @@ function completeBattle($gameId, $playerId, $slotNumber, $isWinner) {
         // Mark slot as completed
         $stmt = $pdo->prepare("
             UPDATE daily_deck_slots 
-            SET completed_at = NOW(), completed_by = ?
+            SET completed_at = NOW(), completed_by_player_id = ?
             WHERE game_id = ? AND deck_date = ? AND slot_number = ?
         ");
         $stmt->execute([$playerId, $gameId, $today, $slotNumber]);
@@ -264,7 +264,7 @@ function activateCurse($gameId, $playerId, $slotNumber) {
         // Mark slot as completed
         $stmt = $pdo->prepare("
             UPDATE daily_deck_slots 
-            SET completed_at = NOW(), completed_by = ?
+            SET completed_at = NOW(), completed_by_player_id = ?
             WHERE game_id = ? AND deck_date = ? AND slot_number = ?
         ");
         $stmt->execute([$playerId, $gameId, $today, $slotNumber]);
@@ -322,7 +322,7 @@ function claimPower($gameId, $playerId, $slotNumber) {
         // Mark slot as completed
         $stmt = $pdo->prepare("
             UPDATE daily_deck_slots 
-            SET completed_at = NOW(), completed_by = ?
+            SET completed_at = NOW(), completed_by_player_id = ?
             WHERE game_id = ? AND deck_date = ? AND slot_number = ?
         ");
         $stmt->execute([$playerId, $gameId, $today, $slotNumber]);

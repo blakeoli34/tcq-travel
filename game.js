@@ -43,37 +43,33 @@ $(document).ready(function() {
     checkBadgeSupport();
     
     // Setup event handlers
-    setupDurationButtons();
     setupModeButtons();
     setupModalHandlers();
     setupScoreBugHandlers();
     
-    // Initialize digital features
-    if (document.body.classList.contains('digital')) {
-        setTimeout(() => {
+    setTimeout(() => {
+        loadDailyDeck();
+        checkVetoWait();
+        updateStatusEffects();
+        loadHandCards();
+    }, 500);
+    
+    // Periodic updates
+    setInterval(() => {
+        if (!isVetoWaiting) {
             loadDailyDeck();
-            checkVetoWait();
-            updateStatusEffects();
-            loadHandCards();
-        }, 500);
-        
-        // Periodic updates
-        setInterval(() => {
-            if (!isVetoWaiting) {
-                loadDailyDeck();
-            }
-            checkVetoWait();
-            updateStatusEffects();
-            refreshGameData();
-        }, 5000);
-    }
+        }
+        checkVetoWait();
+        updateStatusEffects();
+        refreshGameData();
+    }, 5000);
     
     // Setup polling for waiting screens
     setupWaitingScreenPolling();
     
     // Clear badge when app becomes visible
     document.addEventListener('visibilitychange', function() {
-        if (!document.hidden && document.body.classList.contains('digital')) {
+        if (!document.hidden) {
             updateAppBadge(0);
         }
     });
@@ -84,7 +80,6 @@ $(document).ready(function() {
 // ========================================
 
 function loadDailyDeck() {
-    if (!document.body.classList.contains('digital')) return;
     
     fetch('game.php', {
         method: 'POST',
@@ -454,7 +449,6 @@ function selectDeck(deckType) {
 }
 
 function loadHandCards() {
-    if (!document.body.classList.contains('digital')) return;
     
     fetch('game.php', {
         method: 'POST',
@@ -752,7 +746,6 @@ function updateDeckCounts() {
 // ========================================
 
 function checkVetoWait() {
-    if (!document.body.classList.contains('digital')) return;
     
     fetch('game.php', {
         method: 'POST',
@@ -823,7 +816,6 @@ function endVetoWaitDisplay() {
 // ========================================
 
 function updateStatusEffects() {
-    if (!document.body.classList.contains('digital')) return;
     
     fetch('game.php', {
         method: 'POST',
@@ -1411,11 +1403,14 @@ function setGameDates() {
         return;
     }
     
-    const start = new Date(startDate);
-    const end = new Date(endDate);
+    const start = new Date(startDate + 'T00:00:00');
+    const end = new Date(endDate + 'T00:00:00');
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    
+    start.setHours(0, 0, 0, 0);
+
+    console.log('today is set to ' + today + ' & start is set to ' + start);
+
     if (start < today) {
         alert('Start date cannot be in the past');
         return;
@@ -1720,7 +1715,7 @@ function checkBadgeSupport() {
 }
 
 function updateAppBadge(count) {
-    if (!badgeSupported || !document.body.classList.contains('digital')) return;
+    if (!badgeSupported) return;
     
     try {
         if (count > 0) {
@@ -1898,11 +1893,6 @@ window.sendBump = sendBump;
 window.testNotification = testNotification;
 window.endGame = endGame;
 window.readyForNewGame = readyForNewGame;
-
-// Setup functions
-window.showCustomDatePicker = showCustomDatePicker;
-window.hideCustomDatePicker = hideCustomDatePicker;
-window.setCustomDuration = setCustomDuration;
 
 // Notification functions
 window.enableNotifications = enableNotifications;
