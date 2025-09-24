@@ -1376,119 +1376,80 @@ function startNewGamePolling() {
 // DURATION AND MODE SETUP
 // ========================================
 
-function setupDurationButtons() {
-    document.querySelectorAll('.duration-btn:not(.custom-date-btn)').forEach(btn => {
-        btn.addEventListener('click', function() {
-            const days = this.dataset.days;
-            
-            fetch('game.php', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: 'action=set_duration&duration=' + days
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    location.reload();
-                } else {
-                    alert('Failed to set game duration. Please try again.');
-                }
-            })
-            .catch(error => {
-                console.error('Error setting duration:', error);
-                alert('Failed to set game duration. Please try again.');
-            });
-        });
-    });
-}
-
 function setupModeButtons() {
     document.querySelectorAll('.mode-btn').forEach(btn => {
         btn.addEventListener('click', function() {
-            const mode = this.dataset.mode;
+            const modeId = this.dataset.mode;
             
             fetch('game.php', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: 'action=set_game_mode&mode=' + mode
+                body: 'action=set_travel_mode&mode_id=' + modeId
             })
             .then(response => response.json())
             .then(data => {
                 if (data.success) {
-                    if (mode === 'digital') {
-                        document.body.classList.add('digital');
-                    }
                     location.reload();
                 } else {
-                    alert('Failed to set game mode. Please try again.');
+                    alert('Failed to set travel mode. Please try again.');
                 }
             })
             .catch(error => {
-                console.error('Error setting mode:', error);
-                alert('Failed to set game mode. Please try again.');
+                console.error('Error setting travel mode:', error);
+                alert('Failed to set travel mode. Please try again.');
             });
         });
     });
 }
 
-function showCustomDatePicker() {
-    const picker = document.getElementById('customDatePicker');
-    const input = document.getElementById('customEndDate');
-    const notifyBubble = document.querySelector('.notify-bubble');
+function setGameDates() {
+    const startDate = document.getElementById('startDate').value;
+    const endDate = document.getElementById('endDate').value;
     
-    if (notifyBubble) {
-        notifyBubble.style.display = 'none';
-    }
-    
-    const minDate = new Date();
-    minDate.setDate(minDate.getDate() + 7);
-    
-    const maxDate = new Date();
-    maxDate.setFullYear(maxDate.getFullYear() + 1);
-    
-    input.min = minDate.toISOString().split('T')[0];
-    input.max = maxDate.toISOString().split('T')[0];
-    
-    picker.style.display = 'block';
-}
-
-function hideCustomDatePicker() {
-    const picker = document.getElementById('customDatePicker');
-    const notifyBubble = document.querySelector('.notify-bubble');
-    
-    if (notifyBubble) {
-        notifyBubble.style.display = 'block';
-    }
-    
-    picker.style.display = 'none';
-    document.getElementById('customEndDate').value = '';
-}
-
-function setCustomDuration() {
-    const dateInput = document.getElementById('customEndDate');
-    const selectedDate = dateInput.value;
-    
-    if (!selectedDate) {
-        alert('Please select a date');
+    if (!startDate || !endDate) {
+        alert('Please select both start and end dates');
         return;
     }
+    
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    if (start < today) {
+        alert('Start date cannot be in the past');
+        return;
+    }
+    
+    const daysDiff = Math.ceil((end - start) / (1000 * 60 * 60 * 24));
+    
+    if (daysDiff < 1) {
+        alert('End date must be at least 1 day after start date');
+        return;
+    }
+    
+    if (daysDiff > 14) {
+        alert('Maximum adventure length is 14 days');
+        return;
+    }
+    
+    document.getElementById('setDatesBtn').disabled = true;
+    document.getElementById('setDatesBtn').textContent = 'Setting dates...';
     
     fetch('game.php', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: 'action=set_duration&custom_date=' + selectedDate
+        body: `action=set_game_dates&start_date=${startDate}&end_date=${endDate}`
     })
     .then(response => response.json())
     .then(data => {
         if (data.success) {
             location.reload();
         } else {
-            alert('Failed to set custom duration: ' + (data.message || 'Please try again.'));
+            alert('Failed to set dates: ' + (data.message || 'Unknown error'));
+            document.getElementById('setDatesBtn').disabled = false;
+            document.getElementById('setDatesBtn').textContent = 'Start Adventure';
         }
-    })
-    .catch(error => {
-        console.error('Error setting custom duration:', error);
-        alert('Failed to set custom duration. Please try again.');
     });
 }
 
@@ -1534,7 +1495,7 @@ function setupWaitingScreenPolling() {
             })
             .then(response => response.json())
             .then(data => {
-                if (data.success && data.game_mode) {
+                if (data.success && data.travel_mode_id) {
                     window.location.reload();
                 }
             })

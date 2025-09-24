@@ -135,11 +135,17 @@ function selectRandomCards($gameId, $category, $count, $excludeIds = []) {
         }
         
         $stmt = $pdo->prepare("
-            SELECT * FROM cards 
-            WHERE card_category = ? $excludeClause
+            SELECT c.* FROM cards c
+            JOIN card_travel_modes ctm ON c.id = ctm.card_id
+            JOIN games g ON g.travel_mode_id = ctm.mode_id
+            WHERE c.card_category = ? AND g.id = ? $excludeClause
             ORDER BY RAND() 
             LIMIT ?
         ");
+        $params = [$category, $gameId];
+        if (!empty($excludeIds)) {
+            $params = array_merge($params, $excludeIds);
+        }
         $params[] = $count;
         $stmt->execute($params);
         

@@ -346,81 +346,60 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             echo json_encode(['success' => true]);
             exit;
 
-        // Keep existing endpoints that are still needed
-        case 'set_duration':
-            if (isset($_POST['custom_date'])) {
-                // Handle custom date
-                $customDate = $_POST['custom_date'];
-                $timezone = new DateTimeZone('America/Indiana/Indianapolis');
-                $now = new DateTime('now', $timezone);
-                $customDateTime = new DateTime($customDate . ' 23:59:59', $timezone);
-                
-                // Validate date is at least 1 week from now and max 1 year
-                $minDate = clone $now;
-                $minDate->add(new DateInterval('P7D'));
-                $maxDate = clone $now;
-                $maxDate->add(new DateInterval('P1Y'));
-                
-                if ($customDateTime < $minDate || $customDateTime > $maxDate) {
-                    echo json_encode(['success' => false, 'message' => 'Date must be between 1 week and 1 year from now']);
-                    exit;
-                }
-                
-                // Calculate duration in days from now to selected date
-                $diffDays = $now->diff($customDateTime)->days + 1;
-                
-                // Manually set the game dates
-                try {
-                    $pdo = Config::getDatabaseConnection();
-                    $stmt = $pdo->prepare("
-                        UPDATE games 
-                        SET duration_days = ?, start_date = ?, end_date = ?, status = 'active', custom_end_date = ?
-                        WHERE id = ?
-                    ");
-                    $stmt->execute([
-                        $diffDays,
-                        $now->format('Y-m-d H:i:s'),
-                        $customDateTime->format('Y-m-d H:i:s'),
-                        $customDate,
-                        $player['game_id']
-                    ]);
-                    $result = ['success' => true];
-                } catch (Exception $e) {
-                    error_log("Error setting custom duration: " . $e->getMessage());
-                    $result = ['success' => false, 'message' => 'Failed to set custom duration'];
-                }
-            } else {
-                // Handle preset duration
-                $duration = intval($_POST['duration']);
-                $result = setGameDuration($player['game_id'], $duration);
+        case 'set_travel_mode':
+            $modeId = intval($_POST['mode_id']);
+            try {
+                $pdo = Config::getDatabaseConnection();
+                $stmt = $pdo->prepare("UPDATE games SET travel_mode_id = ? WHERE id = ?");
+                $stmt->execute([$modeId, $player['game_id']]);
+                echo json_encode(['success' => true]);
+            } catch (Exception $e) {
+                error_log("Error setting travel mode: " . $e->getMessage());
+                echo json_encode(['success' => false, 'message' => 'Failed to set travel mode']);
             }
-            
-            // Initialize Travel Edition if this is a digital game
-            if ($result['success'] && $gameMode === 'digital') {
-                $initResult = initializeTravelEdition($player['game_id']);
-                if (!$initResult['success']) {
-                    $result['warning'] = 'Game started but failed to initialize Travel Edition';
-                }
-            }
-            
-            echo json_encode($result);
             exit;
 
-        case 'set_game_mode':
-            $mode = $_POST['mode'];
-            if (!in_array($mode, ['hybrid', 'digital'])) {
-                echo json_encode(['success' => false, 'message' => 'Invalid game mode']);
+        case 'set_game_dates':
+            $startDate = $_POST['start_date'];
+            $endDate = $_POST['end_date'];
+            
+            $start = new DateTime($startDate);
+            $end = new DateTime($endDate);
+            $today = new DateTime();
+            $today->setTime(0, 0, 0);
+            
+            if ($start < $today) {
+                echo json_encode(['success' => false, 'message' => 'Start date cannot be in the past']);
+                exit;
+            }
+            
+            $daysDiff = $start->diff($end)->days;
+            
+            if ($daysDiff < 1 || $daysDiff > 14) {
+                echo json_encode(['success' => false, 'message' => 'Game must be 1-14 days long']);
                 exit;
             }
             
             try {
                 $pdo = Config::getDatabaseConnection();
-                $stmt = $pdo->prepare("UPDATE games SET game_mode = ? WHERE id = ?");
-                $stmt->execute([$mode, $player['game_id']]);
+                $stmt = $pdo->prepare("
+                    UPDATE games 
+                    SET start_date = ?, end_date = ?, status = 'active', duration_days = ?
+                    WHERE id = ?
+                ");
+                $stmt->execute([$startDate, $endDate, $daysDiff + 1, $player['game_id']]);
+                
+                // Initialize Travel Edition
+                $initResult = initializeTravelEdition($player['game_id']);
+                if (!$initResult['success']) {
+                    echo json_encode(['success' => false, 'message' => 'Failed to initialize game']);
+                    exit;
+                }
+                
                 echo json_encode(['success' => true]);
             } catch (Exception $e) {
-                error_log("Error setting game mode: " . $e->getMessage());
-                echo json_encode(['success' => false, 'message' => 'Failed to set game mode']);
+                error_log("Error setting game dates: " . $e->getMessage());
+                echo json_encode(['success' => false, 'message' => 'Failed to set dates']);
             }
             exit;
             
@@ -516,7 +495,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 echo json_encode([
                     'success' => true,
                     'status' => $gameInfo['status'],
-                    'game_mode' => $gameInfo['game_mode'],
+                    'travel_mode_id' => $gameInfo['travel_mode_id'],
                     'player_count' => count($currentPlayers)
                 ]);
             } catch (Exception $e) {
@@ -673,27 +652,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 </div>
             </div>
             
-       <?php elseif ($gameStatus === 'waiting' && count($players) === 2 && (!$gameMode || $gameMode === '')): ?>
-            <!-- Set game mode -->
+        <?php elseif ($gameStatus === 'waiting' && count($players) === 2 && (!$gameData['travel_mode_id'])): ?>
+            <!-- Select travel mode -->
             <div class="waiting-screen mode-selection">
-                <h2>Choose Game Mode</h2>
-                <p>How would you like to play?</p>
+                <h2>Choose Travel Mode</h2>
+                <p>What type of adventure are you taking?</p>
                 <div class="mode-options">
-                    <div class="mode-btn" data-mode="hybrid">
-                        <div class="mode-icon">🃏📱</div>
-                        <div class="mode-title">Hybrid</div>
-                        <div class="mode-description">Physical cards + app for scoring</div>
-                    </div>
-                    <div class="mode-btn" data-mode="digital">
-                        <div class="mode-icon">📱✨</div>
-                        <div class="mode-title">Digital</div>
-                        <div class="mode-description">Play entirely within the app</div>
-                    </div>
+                    <?php
+                    $stmt = $pdo->prepare("SELECT * FROM travel_modes ORDER BY mode_title");
+                    $stmt->execute();
+                    $modes = $stmt->fetchAll();
+                    
+                    foreach ($modes as $mode):
+                    ?>
+                        <div class="mode-btn" data-mode="<?= $mode['id'] ?>">
+                            <div class="mode-icon">
+                                <i class="fa-solid <?= htmlspecialchars($mode['mode_icon']) ?>"></i>
+                            </div>
+                            <div class="mode-title"><?= htmlspecialchars($mode['mode_title']) ?></div>
+                            <div class="mode-description"><?= htmlspecialchars($mode['mode_description']) ?></div>
+                        </div>
+                    <?php endforeach; ?>
                 </div>
             </div>
             
-        <?php elseif ($gameStatus === 'waiting' && count($players) === 2 && $gameMode && !$gameData['duration_days']): ?>
-            <!-- Set game duration -->
+        <?php elseif ($gameStatus === 'waiting' && count($players) === 2 && $gameMode && !$gameData['start_date']): ?>
+            <!-- Set game dates -->
             <div class="waiting-screen duration">
                 <div class="notify-bubble" style="margin-bottom: 30px; padding: 20px; border-radius: 15px;">
                     <h3 style="margin-bottom: 15px;">🔔 Enable Notifications</h3>
@@ -703,31 +687,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     </button>
                     <div id="notificationStatus" style="margin-top: 10px; font-size: 14px;"></div>
                 </div>
-                <h2>Set Game Duration</h2>
-                <p>How long should this game last?</p>
-                <div class="duration-options">
-                    <div class="duration-btn" data-days="7">1 Week</div>
-                    <div class="duration-btn" data-days="14">2 Weeks</div>
-                    <div class="duration-btn" data-days="30">1 Month</div>
-                    <div class="duration-btn recommended" data-days="90">3 Months</div>
-                    <div class="duration-btn" data-days="180">6 Months</div>
-                    <div class="duration-btn" data-days="365">1 Year</div>
-                    <div class="duration-btn custom-date-btn" onclick="showCustomDatePicker()">
-                        <div style="font-size: 18px; margin-bottom: 5px;">📅</div>
-                        Custom Date
-                    </div>
+                <h2>Set Game Dates</h2>
+                <p>Choose your adventure dates (1-14 days)</p>
+                
+                <div class="form-group">
+                    <label for="startDate">Start Date:</label>
+                    <input type="date" id="startDate" required>
                 </div>
-
-                <div class="custom-date-picker" id="customDatePicker" style="display: none;">
-                    <div class="form-group">
-                        <label for="customEndDate">Choose End Date:</label>
-                        <input type="date" id="customEndDate" min="" max="">
-                    </div>
-                    <div style="display: flex; gap: 15px;">
-                        <button class="btn btn-secondary" onclick="hideCustomDatePicker()" style="flex: 1;">Cancel</button>
-                        <button class="btn" onclick="setCustomDuration()" style="flex: 1;">Set Duration</button>
-                    </div>
+                
+                <div class="form-group">
+                    <label for="endDate">End Date:</label>
+                    <input type="date" id="endDate" required>
                 </div>
+                
+                <button class="btn" onclick="setGameDates()" id="setDatesBtn">Start Adventure</button>
             </div>
             
         <?php elseif ($gameStatus === 'completed'): ?>

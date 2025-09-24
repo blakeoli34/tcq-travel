@@ -41,9 +41,34 @@ function saveCard($data) {
             $sql .= $categoryFields['columns'] . ") VALUES (?, ?, ?, ?" . $categoryFields['placeholders'] . ")";
             $params = array_merge($params, $categoryFields['params']);
         }
-        
+
         $stmt = $pdo->prepare($sql);
         $stmt->execute($params);
+
+        // Get the card ID for travel mode assignments
+        if ($id) {
+            $cardId = $id;
+        } else {
+            $cardId = $pdo->lastInsertId();
+        }
+
+        // Clear existing mode assignments for both new and updated cards
+        $stmt = $pdo->prepare("DELETE FROM card_travel_modes WHERE card_id = ?");
+        $stmt->execute([$cardId]);
+
+        // Add travel mode assignments
+        $travelModes = $_POST['travel_modes'] ?? [];
+        if (empty($travelModes)) {
+            // If no modes selected, assign to all modes
+            $stmt = $pdo->prepare("SELECT id FROM travel_modes");
+            $stmt->execute();
+            $travelModes = $stmt->fetchAll(PDO::FETCH_COLUMN);
+        }
+
+        foreach ($travelModes as $modeId) {
+            $stmt = $pdo->prepare("INSERT INTO card_travel_modes (card_id, mode_id) VALUES (?, ?)");
+            $stmt->execute([$cardId, intval($modeId)]);
+        }
         
         return ['success' => true];
         
@@ -231,7 +256,14 @@ function getCardsByCategory($category) {
         $pdo = Config::getDatabaseConnection();
         $stmt = $pdo->prepare("SELECT * FROM cards WHERE card_category = ? ORDER BY card_name ASC");
         $stmt->execute([$category]);
-        return $stmt->fetchAll();
+        $cards = $stmt->fetchAll();
+        
+        // Add travel mode icons to each card
+        foreach ($cards as &$card) {
+            $card['travel_mode_icons'] = getCardTravelModeIcons($card['id']);
+        }
+        
+        return $cards;
     } catch (Exception $e) {
         error_log("Error getting cards: " . $e->getMessage());
         return [];
@@ -243,10 +275,58 @@ function getCardById($id) {
         $pdo = Config::getDatabaseConnection();
         $stmt = $pdo->prepare("SELECT * FROM cards WHERE id = ?");
         $stmt->execute([$id]);
-        return $stmt->fetch();
+        $card = $stmt->fetch();
+        
+        if ($card) {
+            $card['travel_modes'] = getCardTravelModes($card['id']);
+        }
+        
+        return $card;
     } catch (Exception $e) {
         error_log("Error getting card: " . $e->getMessage());
         return null;
+    }
+}
+
+function getCardTravelModes($cardId) {
+    try {
+        $pdo = Config::getDatabaseConnection();
+        $stmt = $pdo->prepare("SELECT mode_id FROM card_travel_modes WHERE card_id = ?");
+        $stmt->execute([$cardId]);
+        return $stmt->fetchAll(PDO::FETCH_COLUMN);
+    } catch (Exception $e) {
+        return [];
+    }
+}
+
+function getCardTravelModeIcons($cardId) {
+    try {
+        $pdo = Config::getDatabaseConnection();
+        
+        // Get total travel modes count
+        $stmt = $pdo->query("SELECT COUNT(*) FROM travel_modes");
+        $totalModes = $stmt->fetchColumn();
+        
+        // Get card's travel modes with icons
+        $stmt = $pdo->prepare("
+            SELECT tm.mode_icon 
+            FROM card_travel_modes ctm
+            JOIN travel_modes tm ON ctm.mode_id = tm.id
+            WHERE ctm.card_id = ?
+        ");
+        $stmt->execute([$cardId]);
+        $cardModes = $stmt->fetchAll(PDO::FETCH_COLUMN);
+        
+        if (count($cardModes) === $totalModes) {
+            return '<i class="fa-solid fa-globe" title="All modes"></i>';
+        } else {
+            $icons = array_map(function($icon) {
+                return '<i class="fa-solid ' . htmlspecialchars($icon) . '"></i>';
+            }, $cardModes);
+            return implode(' ', $icons);
+        }
+    } catch (Exception $e) {
+        return '';
     }
 }
 

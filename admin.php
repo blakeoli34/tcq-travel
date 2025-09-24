@@ -60,44 +60,64 @@ if ($_POST && isset($_POST['action'])) {
             echo json_encode(['success' => true, 'cards' => $cards, 'counts' => $counts]);
             exit;
 
-        case 'save_scheduled_theme':
-            try {
-                $pdo = Config::getDatabaseConnection();
-                
-                $themeDate = $_POST['theme_date'];
-                $themeClass = trim($_POST['theme_class']);
-                $description = trim($_POST['description']);
-                
-                if (empty($themeDate) || empty($themeClass)) {
-                    echo json_encode(['success' => false, 'message' => 'Date and theme class are required']);
-                    exit;
-                }
-                
-                $stmt = $pdo->prepare("
-                    INSERT INTO scheduled_themes (theme_date, theme_class, description)
-                    VALUES (?, ?, ?)
-                    ON DUPLICATE KEY UPDATE theme_class = VALUES(theme_class), description = VALUES(description)
-                ");
-                $stmt->execute([$themeDate, $themeClass, $description]);
-                
-                echo json_encode(['success' => true]);
-                
-            } catch (Exception $e) {
-                error_log("Error saving scheduled theme: " . $e->getMessage());
-                echo json_encode(['success' => false, 'message' => 'Failed to save theme']);
-            }
-            exit;
-
-        case 'delete_scheduled_theme':
+        case 'get_travel_mode':
             try {
                 $id = intval($_POST['id']);
                 $pdo = Config::getDatabaseConnection();
-                $stmt = $pdo->prepare("DELETE FROM scheduled_themes WHERE id = ?");
+                $stmt = $pdo->prepare("SELECT * FROM travel_modes WHERE id = ?");
+                $stmt->execute([$id]);
+                $mode = $stmt->fetch();
+                
+                if ($mode) {
+                    echo json_encode(['success' => true, 'mode' => $mode]);
+                } else {
+                    echo json_encode(['success' => false, 'message' => 'Travel mode not found']);
+                }
+            } catch (Exception $e) {
+                error_log("Error getting travel mode: " . $e->getMessage());
+                echo json_encode(['success' => false, 'message' => 'Failed to get travel mode']);
+            }
+            exit;
+
+        case 'save_travel_mode':
+            try {
+                $pdo = Config::getDatabaseConnection();
+                
+                $id = !empty($_POST['id']) ? intval($_POST['id']) : null;
+                $modeTitle = trim($_POST['mode_title']);
+                $modeDescription = trim($_POST['mode_description']);
+                $modeIcon = trim($_POST['mode_icon']);
+                
+                if (empty($modeTitle)) {
+                    echo json_encode(['success' => false, 'message' => 'Mode title is required']);
+                    exit;
+                }
+                
+                if ($id) {
+                    $stmt = $pdo->prepare("UPDATE travel_modes SET mode_title = ?, mode_description = ?, mode_icon = ? WHERE id = ?");
+                    $stmt->execute([$modeTitle, $modeDescription, $modeIcon, $id]);
+                } else {
+                    $stmt = $pdo->prepare("INSERT INTO travel_modes (mode_title, mode_description, mode_icon) VALUES (?, ?, ?)");
+                    $stmt->execute([$modeTitle, $modeDescription, $modeIcon]);
+                }
+                
+                echo json_encode(['success' => true]);
+            } catch (Exception $e) {
+                error_log("Error saving travel mode: " . $e->getMessage());
+                echo json_encode(['success' => false, 'message' => 'Failed to save travel mode']);
+            }
+            exit;
+
+        case 'delete_travel_mode':
+            try {
+                $id = intval($_POST['id']);
+                $pdo = Config::getDatabaseConnection();
+                $stmt = $pdo->prepare("DELETE FROM travel_modes WHERE id = ?");
                 $stmt->execute([$id]);
                 echo json_encode(['success' => true]);
             } catch (Exception $e) {
-                error_log("Error deleting scheduled theme: " . $e->getMessage());
-                echo json_encode(['success' => false, 'message' => 'Failed to delete theme']);
+                error_log("Error deleting travel mode: " . $e->getMessage());
+                echo json_encode(['success' => false, 'message' => 'Failed to delete travel mode']);
             }
             exit;
     }
@@ -203,17 +223,30 @@ try {
     error_log("Error loading rules: " . $e->getMessage());
 }
 
-// Get scheduled themes
 try {
     $stmt = $pdo->query("
-        SELECT * FROM scheduled_themes 
-        ORDER BY theme_date DESC
+        SELECT tm.*, 
+               COALESCE(SUM(c.quantity), 0) as total_cards,
+               COALESCE(SUM(CASE WHEN c.card_category = 'challenge' THEN c.quantity ELSE 0 END), 0) as challenge_count,
+               COALESCE(SUM(CASE WHEN c.card_category = 'curse' THEN c.quantity ELSE 0 END), 0) as curse_count,
+               COALESCE(SUM(CASE WHEN c.card_category = 'power' THEN c.quantity ELSE 0 END), 0) as power_count,
+               COALESCE(SUM(CASE WHEN c.card_category = 'battle' THEN c.quantity ELSE 0 END), 0) as battle_count,
+               COALESCE(SUM(CASE WHEN c.card_category = 'snap' AND c.male = 1 THEN c.quantity ELSE 0 END), 0) as snap_male_count,
+               COALESCE(SUM(CASE WHEN c.card_category = 'snap' AND c.female = 1 THEN c.quantity ELSE 0 END), 0) as snap_female_count,
+               COALESCE(SUM(CASE WHEN c.card_category = 'spicy' AND c.male = 1 THEN c.quantity ELSE 0 END), 0) as spicy_male_count,
+               COALESCE(SUM(CASE WHEN c.card_category = 'spicy' AND c.female = 1 THEN c.quantity ELSE 0 END), 0) as spicy_female_count
+        FROM travel_modes tm
+        LEFT JOIN card_travel_modes ctm ON tm.id = ctm.mode_id
+        LEFT JOIN cards c ON ctm.card_id = c.id
+        GROUP BY tm.id
+        ORDER BY tm.mode_title
     ");
-    $scheduledThemes = $stmt->fetchAll();
+    $travelModes = $stmt->fetchAll();
 } catch (Exception $e) {
-    error_log("Error loading scheduled themes: " . $e->getMessage());
-    $scheduledThemes = [];
+    error_log("Error loading travel modes: " . $e->getMessage());
+    $travelModes = [];
 }
+
 
 function authenticateAdmin($username, $password) {
     try {
@@ -524,6 +557,7 @@ function showLoginForm($error = null) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/aquawolf04/font-awesome-pro@5cd1511/css/all.css">
     <title>Admin Dashboard - TCQ Travel Edition</title>
     <style>
         * {
@@ -718,6 +752,67 @@ function showLoginForm($error = null) {
         
         .btn-warning:hover {
             background: #e0a800;
+        }
+
+        .code-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            margin-bottom: 10px;
+        }
+        
+        .code-details {
+            flex: 1;
+        }
+        
+        .code-value {
+            font-family: 'Courier New', monospace;
+            font-weight: bold;
+            font-size: 18px;
+            color: #333;
+        }
+        
+        .code-meta {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+        }
+        
+        .player-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            margin-bottom: 10px;
+        }
+        
+        .player-details {
+            flex: 1;
+        }
+        
+        .player-name {
+            font-weight: bold;
+            font-size: 16px;
+            color: #333;
+        }
+        
+        .player-meta {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+        }
+        
+        .device-id {
+            font-family: 'Courier New', monospace;
+            background: #e9ecef;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 11px;
         }
         
         .card-tabs {
@@ -942,6 +1037,34 @@ function showLoginForm($error = null) {
             </form>
         </div>
 
+        <!-- Unused Invite Codes -->
+        <div class="section">
+            <h2>Unused Invite Codes (<?= count($stats['unusedCodesList']) ?>)</h2>
+            
+            <?php if (empty($stats['unusedCodesList'])): ?>
+                <p style="color: #666; text-align: center; padding: 20px;">No unused invite codes</p>
+            <?php else: ?>
+                <?php foreach ($stats['unusedCodesList'] as $code): ?>
+                    <div class="code-item">
+                        <div class="code-details">
+                            <div class="code-value"><?= htmlspecialchars($code['code']) ?></div>
+                            <div class="code-meta">
+                                Created: <?= date('M j, Y g:i A', strtotime($code['created_at'])) ?>
+                                <?php if ($code['expires_at']): ?>
+                                    | Expires: <?= date('M j, Y g:i A', strtotime($code['expires_at'])) ?>
+                                <?php endif; ?>
+                            </div>
+                        </div>
+                        <div class="actions">
+                            <button class="btn-small btn-danger" onclick="confirmDeleteCode(<?= $code['id'] ?>, '<?= htmlspecialchars($code['code']) ?>')">
+                                Delete
+                            </button>
+                        </div>
+                    </div>
+                <?php endforeach; ?>
+            <?php endif; ?>
+        </div>
+
         <!-- Card Management -->
         <div class="section">
             <h2>Card Management</h2>
@@ -1017,6 +1140,49 @@ function showLoginForm($error = null) {
             </div>
         </div>
 
+        <!-- Travel Modes Management -->
+        <div class="section">
+            <h2>Travel Modes Management</h2>
+            
+            <div class="card-header">
+                <h3>Travel Modes</h3>
+                <button class="btn" onclick="openTravelModeModal()">Add Travel Mode</button>
+            </div>
+            
+            <?php if (empty($travelModes)): ?>
+                <p style="color: #666; text-align: center; padding: 20px;">No travel modes created</p>
+            <?php else: ?>
+                <?php foreach ($travelModes as $mode): ?>
+                    <div class="code-item">
+                        <div class="code-details">
+                            <div class="code-value">
+                                <i class="fa-solid <?= htmlspecialchars($mode['mode_icon']) ?>"></i>
+                                <?= htmlspecialchars($mode['mode_title']) ?>
+                            </div>
+                            <div class="code-meta">
+                                <?= htmlspecialchars($mode['mode_description']) ?>
+                                <br>
+                                <strong>Cards:</strong> 
+                                Challenge: <?= $mode['challenge_count'] ?> | 
+                                Curse: <?= $mode['curse_count'] ?> | 
+                                Power: <?= $mode['power_count'] ?> | 
+                                Battle: <?= $mode['battle_count'] ?> | 
+                                Snap: M<?= $mode['snap_male_count'] ?>/F<?= $mode['snap_female_count'] ?> | 
+                                Spicy: M<?= $mode['spicy_male_count'] ?>/F<?= $mode['spicy_female_count'] ?> 
+                                (Total: <?= $mode['total_cards'] ?>)
+                            </div>
+                        </div>
+                        <div class="actions">
+                            <button class="btn-small btn-warning" onclick="openTravelModeModal(<?= $mode['id'] ?>)">Edit</button>
+                            <button class="btn-small btn-danger" onclick="confirmDeleteTravelMode(<?= $mode['id'] ?>, '<?= htmlspecialchars($mode['mode_title']) ?>')">
+                                Delete
+                            </button>
+                        </div>
+                    </div>
+                <?php endforeach; ?>
+            <?php endif; ?>
+        </div>
+
         <!-- Active Players -->
         <div class="section">
             <h2>Active Players (<?= count($stats['activePlayers']) ?>)</h2>
@@ -1042,34 +1208,6 @@ function showLoginForm($error = null) {
                                     | <span style="color: #dc3545;">🔕 No notifications</span>
                                 <?php endif; ?>
                             </div>
-                        </div>
-                    </div>
-                <?php endforeach; ?>
-            <?php endif; ?>
-        </div>
-
-        <!-- Unused Invite Codes -->
-        <div class="section">
-            <h2>Unused Invite Codes (<?= count($stats['unusedCodesList']) ?>)</h2>
-            
-            <?php if (empty($stats['unusedCodesList'])): ?>
-                <p style="color: #666; text-align: center; padding: 20px;">No unused invite codes</p>
-            <?php else: ?>
-                <?php foreach ($stats['unusedCodesList'] as $code): ?>
-                    <div class="code-item">
-                        <div class="code-details">
-                            <div class="code-value"><?= htmlspecialchars($code['code']) ?></div>
-                            <div class="code-meta">
-                                Created: <?= date('M j, Y g:i A', strtotime($code['created_at'])) ?>
-                                <?php if ($code['expires_at']): ?>
-                                    | Expires: <?= date('M j, Y g:i A', strtotime($code['expires_at'])) ?>
-                                <?php endif; ?>
-                            </div>
-                        </div>
-                        <div class="actions">
-                            <button class="btn-small btn-danger" onclick="confirmDeleteCode(<?= $code['id'] ?>, '<?= htmlspecialchars($code['code']) ?>')">
-                                Delete
-                            </button>
                         </div>
                     </div>
                 <?php endforeach; ?>
@@ -1132,39 +1270,6 @@ function showLoginForm($error = null) {
                 <button type="submit" name="save_rules" class="btn">Save Rules</button>
             </form>
         </div>
-
-        <!-- Scheduled Themes Management -->
-        <div class="section">
-            <h2>Scheduled Themes Management</h2>
-            
-            <div class="card-header">
-                <h3>Schedule Theme for Date</h3>
-                <button class="btn" onclick="openThemeModal()">Add Scheduled Theme</button>
-            </div>
-            
-            <?php if (empty($scheduledThemes)): ?>
-                <p style="color: #666; text-align: center; padding: 20px;">No scheduled themes</p>
-            <?php else: ?>
-                <?php foreach ($scheduledThemes as $theme): ?>
-                    <div class="code-item">
-                        <div class="code-details">
-                            <div class="code-value"><?= date('M j, Y', strtotime($theme['theme_date'])) ?></div>
-                            <div class="code-meta">
-                                Class: <strong><?= htmlspecialchars($theme['theme_class']) ?></strong>
-                                <?php if ($theme['description']): ?>
-                                    | <?= htmlspecialchars($theme['description']) ?>
-                                <?php endif; ?>
-                            </div>
-                        </div>
-                        <div class="actions">
-                            <button class="btn-small btn-danger" onclick="confirmDeleteTheme(<?= $theme['id'] ?>, '<?= htmlspecialchars($theme['theme_date']) ?>')">
-                                Delete
-                            </button>
-                        </div>
-                    </div>
-                <?php endforeach; ?>
-            <?php endif; ?>
-        </div>
     </div>
 
     <!-- Card Management Modal -->
@@ -1174,6 +1279,20 @@ function showLoginForm($error = null) {
             <form id="cardForm" class="modal-form">
                 <input type="hidden" id="cardId">
                 <input type="hidden" id="cardCategory">
+
+                <!-- Travel Modes Selection -->
+                <label>Available in Travel Modes</label>
+                <div class="checkbox-group" id="travelModesCheckboxes">
+                    <?php foreach ($travelModes as $mode): ?>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="mode_<?= $mode['id'] ?>" name="travel_modes[]" value="<?= $mode['id'] ?>" checked>
+                            <label for="mode_<?= $mode['id'] ?>">
+                                <i class="fa-solid <?= htmlspecialchars($mode['mode_icon']) ?>"></i>
+                                <?= htmlspecialchars($mode['mode_title']) ?>
+                            </label>
+                        </div>
+                    <?php endforeach; ?>
+                </div>
                 
                 <div class="form-group">
                     <label for="cardName">Card Name</label>
@@ -1495,42 +1614,32 @@ function showLoginForm($error = null) {
         </div>
     </div>
 
-    <!-- Theme Management Modal -->
-    <div class="confirm-dialog" id="themeModal">
+    <!-- Travel Mode Management Modal -->
+    <div class="confirm-dialog" id="travelModeModal">
         <div class="confirm-content" style="max-width: 500px;">
-            <h3>Schedule Theme</h3>
-            <form id="themeForm" class="modal-form">
+            <h3 id="travelModeModalTitle">Add Travel Mode</h3>
+            <form id="travelModeForm" class="modal-form">
+                <input type="hidden" id="travelModeId">
+                
                 <div class="form-group">
-                    <label for="themeDate">Date</label>
-                    <input type="date" id="themeDate" required>
+                    <label for="modeTitle">Mode Title</label>
+                    <input type="text" id="modeTitle" required>
                 </div>
                 
                 <div class="form-group">
-                    <label for="themeClass">Theme Class Name</label>
-                    <input type="text" id="themeClass" placeholder="e.g. valentine-theme, halloween-theme" required>
+                    <label for="modeDescription">Mode Description</label>
+                    <textarea id="modeDescription" rows="3"></textarea>
                 </div>
                 
                 <div class="form-group">
-                    <label for="themeDescription">Description (Optional)</label>
-                    <input type="text" id="themeDescription" placeholder="e.g. Valentine's Day Theme">
+                    <label for="modeIcon">Mode Icon (Font Awesome class)</label>
+                    <input type="text" id="modeIcon" placeholder="fa-plane">
                 </div>
             </form>
             
             <div class="confirm-buttons">
-                <button class="btn btn-secondary" onclick="closeThemeModal()">Cancel</button>
-                <button class="btn" onclick="saveScheduledTheme()">Save Theme</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Confirm Delete Theme Modal -->
-    <div class="confirm-dialog" id="confirmDeleteTheme">
-        <div class="confirm-content">
-            <h3>Delete Scheduled Theme</h3>
-            <p>Are you sure you want to delete the theme for <strong id="deleteThemeDate"></strong>?</p>
-            <div class="confirm-buttons">
-                <button class="btn btn-secondary" onclick="closeConfirmDialog()">Cancel</button>
-                <button class="btn" style="background: #dc3545;" onclick="deleteScheduledTheme()">Delete</button>
+                <button class="btn btn-secondary" onclick="closeTravelModeModal()">Cancel</button>
+                <button class="btn" onclick="saveTravelMode()">Save Mode</button>
             </div>
         </div>
     </div>
@@ -1568,6 +1677,86 @@ function showLoginForm($error = null) {
     
     <script>
         let currentCardCategory = 'challenge';
+
+        // Travel mode management functions
+        function openTravelModeModal(modeId = null) {
+            document.getElementById('travelModeForm').reset();
+            document.getElementById('travelModeId').value = modeId || '';
+            
+            if (modeId) {
+                document.getElementById('travelModeModalTitle').textContent = 'Edit Travel Mode';
+                loadTravelModeData(modeId);
+            } else {
+                document.getElementById('travelModeModalTitle').textContent = 'Add Travel Mode';
+            }
+            
+            document.getElementById('travelModeModal').classList.add('active');
+        }
+
+        function closeTravelModeModal() {
+            document.getElementById('travelModeModal').classList.remove('active');
+        }
+
+        function saveTravelMode() {
+            const formData = new FormData();
+            formData.append('action', 'save_travel_mode');
+            formData.append('id', document.getElementById('travelModeId').value);
+            formData.append('mode_title', document.getElementById('modeTitle').value);
+            formData.append('mode_description', document.getElementById('modeDescription').value);
+            formData.append('mode_icon', document.getElementById('modeIcon').value);
+            
+            fetch('admin.php', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    closeTravelModeModal();
+                    location.reload();
+                } else {
+                    alert('Error saving travel mode: ' + (data.message || 'Unknown error'));
+                }
+            });
+        }
+
+        function loadTravelModeData(modeId) {
+            fetch('admin.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: 'action=get_travel_mode&id=' + modeId
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    document.getElementById('modeTitle').value = data.mode.mode_title;
+                    document.getElementById('modeDescription').value = data.mode.mode_description;
+                    document.getElementById('modeIcon').value = data.mode.mode_icon;
+                }
+            });
+        }
+
+        function confirmDeleteTravelMode(modeId, modeTitle) {
+            if (confirm(`Are you sure you want to delete the travel mode "${modeTitle}"?`)) {
+                deleteTravelMode(modeId);
+            }
+        }
+
+        function deleteTravelMode(modeId) {
+            fetch('admin.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: 'action=delete_travel_mode&id=' + modeId
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    location.reload();
+                } else {
+                    alert('Error deleting travel mode: ' + (data.message || 'Unknown error'));
+                }
+            });
+        }
 
         function showCardCategory(category) {
             currentCardCategory = category;
@@ -1692,6 +1881,8 @@ function showLoginForm($error = null) {
             }
 
             if (card.quantity && card.quantity > 1) meta.push(`${card.quantity}x`);
+
+            if (card.travel_mode_icons) meta.push(card.travel_mode_icons);
             
             return meta.join(' • ');
         }
@@ -1740,6 +1931,19 @@ function showLoginForm($error = null) {
             document.getElementById('cardName').value = card.card_name;
             document.getElementById('cardDescription').value = card.card_description;
             if (card.quantity) document.getElementById('cardQuantity').value = card.quantity;
+
+            // Clear travel mode checkboxes
+            document.querySelectorAll('#travelModesCheckboxes input[type="checkbox"]').forEach(cb => {
+                cb.checked = false;
+            });
+
+            // Load card's travel modes
+            if (card.travel_modes) {
+                card.travel_modes.forEach(modeId => {
+                    const checkbox = document.getElementById('mode_' + modeId);
+                    if (checkbox) checkbox.checked = true;
+                });
+            }
             
             // Populate category-specific fields
             switch (card.card_category) {
@@ -1821,6 +2025,15 @@ function showLoginForm($error = null) {
             formData.append('card_name', document.getElementById('cardName').value);
             formData.append('card_description', document.getElementById('cardDescription').value);
             formData.append('quantity', document.getElementById('cardQuantity').value || '1');
+
+            // Add travel modes
+            const selectedModes = [];
+            document.querySelectorAll('#travelModesCheckboxes input[type="checkbox"]:checked').forEach(cb => {
+                selectedModes.push(cb.value);
+            });
+            selectedModes.forEach(modeId => {
+                formData.append('travel_modes[]', modeId);
+            });
             
             const category = document.getElementById('cardCategory').value;
             
@@ -1949,65 +2162,6 @@ function showLoginForm($error = null) {
         function closeConfirmDialog() {
             document.querySelectorAll('.confirm-dialog').forEach(dialog => {
                 dialog.classList.remove('active');
-            });
-        }
-
-        // Theme management functions
-        let selectedThemeId = null;
-
-        function openThemeModal() {
-            document.getElementById('themeForm').reset();
-            document.getElementById('themeModal').classList.add('active');
-        }
-
-        function closeThemeModal() {
-            document.getElementById('themeModal').classList.remove('active');
-        }
-
-        function saveScheduledTheme() {
-            const formData = new FormData();
-            formData.append('action', 'save_scheduled_theme');
-            formData.append('theme_date', document.getElementById('themeDate').value);
-            formData.append('theme_class', document.getElementById('themeClass').value);
-            formData.append('description', document.getElementById('themeDescription').value);
-            
-            fetch('admin.php', {
-                method: 'POST',
-                body: formData
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    closeThemeModal();
-                    location.reload();
-                } else {
-                    alert('Error saving theme: ' + (data.message || 'Unknown error'));
-                }
-            });
-        }
-
-        function confirmDeleteTheme(themeId, themeDate) {
-            selectedThemeId = themeId;
-            document.getElementById('deleteThemeDate').textContent = new Date(themeDate).toLocaleDateString();
-            document.getElementById('confirmDeleteTheme').classList.add('active');
-        }
-
-        function deleteScheduledTheme() {
-            if (!selectedThemeId) return;
-            
-            fetch('admin.php', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: `action=delete_scheduled_theme&id=${selectedThemeId}`
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    location.reload();
-                } else {
-                    alert('Error deleting theme: ' + (data.message || 'Unknown error'));
-                }
-                closeConfirmDialog();
             });
         }
 
