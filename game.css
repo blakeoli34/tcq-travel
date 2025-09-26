@@ -65,6 +65,7 @@ body.beach {
     transform: translateY(-100%);
     transition: transform 0.4s cubic-bezier(0.2, 0.8, 0.3, 1.1);
     padding-top: 60px;
+    overflow: hidden;
 }
 
 .hand-overlay.active {
@@ -118,27 +119,101 @@ body.beach {
     font-size: 14px;
 }
 
-.hand-cards {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 20px;
+.hand-slots {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 15px;
+    margin-bottom: 30px;
 }
 
-.hand-card {
-    width: calc(50% - 10px);
-    background: linear-gradient(to bottom, #fff 50%, #ccc 100%);
+.hand-slot {
+    aspect-ratio: 1.85;
+    background: rgba(255,255,255,0.1);
+    border: 2px dashed rgba(255,255,255,0.3);
     border-radius: 15px;
-    padding: 20px;
-    min-height: 200px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    transition: all 0.3s ease;
+}
+
+.hand-slot.empty {
+    border-style: dashed;
+}
+
+.hand-slot.filled {
+    border-style: solid;
+    border-color: rgba(255,255,255,0.5);
+    background: rgba(255,255,255,0.2);
+}
+
+.empty-slot-indicator {
+    color: rgba(255,255,255,0.5);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.hand-slot-card {
+    width: 100%;
+    height: 100%;
+    background: white;
+    border-radius: 12px;
+    padding: 8px;
     display: flex;
     flex-direction: column;
-    border: solid 1px #ccc;
     cursor: pointer;
     transition: transform 0.2s ease;
 }
 
-.hand-card:hover {
-    transform: translateY(-2px);
+.hand-slot-card:hover {
+    transform: scale(1.05);
+}
+
+.hand-slot-card-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 4px;
+}
+
+.hand-slot-card-icon {
+    width: 16px;
+    height: 16px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    color: white;
+}
+
+.hand-slot-card-icon.power { background: #68B684; }
+.hand-slot-card-icon.snap { background: var(--color-pink); }
+.hand-slot-card-icon.spicy { background: var(--color-blue); }
+
+.hand-slot-card-name {
+    font-size: 10px;
+    font-weight: 700;
+    color: #333;
+    flex: 1;
+    line-height: 1.2;
+}
+
+.hand-slot-card-quantity {
+    position: absolute;
+    top: -5px;
+    right: -5px;
+    background: #333;
+    color: white;
+    border-radius: 50%;
+    width: 18px;
+    height: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    font-weight: 700;
 }
 
 /* Daily Deck Container */
@@ -399,6 +474,7 @@ body.beach {
     transform: translateX(-50%);
     transition: all 0.3s ease;
     z-index: 1000;
+    padding: 8px 40px;
 }
 
 .score-bug-content {
@@ -440,8 +516,17 @@ body.beach {
 
 .status-effects {
     display: flex;
+    flex-flow: column nowrap;
     gap: 8px;
-    margin-top: 8px;
+    position: absolute;
+    top: 50%;
+    left: 10px;
+    transform: translateY(-50%);
+}
+
+.status-effects.player-effects {
+    left: unset;
+    right: 10px;
 }
 
 .status-effect {

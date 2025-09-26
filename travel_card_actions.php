@@ -13,14 +13,14 @@ function completeChallenge($gameId, $playerId, $slotNumber) {
         
         $pdo->beginTransaction();
         
-        // Get card in slot
+        // Get card in slot FOR THIS SPECIFIC PLAYER
         $stmt = $pdo->prepare("
             SELECT dds.*, c.*
             FROM daily_deck_slots dds
             JOIN cards c ON dds.card_id = c.id
-            WHERE dds.game_id = ? AND dds.deck_date = ? AND dds.slot_number = ? AND c.card_category = 'challenge'
+            WHERE dds.game_id = ? AND dds.player_id = ? AND dds.deck_date = ? AND dds.slot_number = ? AND c.card_category = 'challenge'
         ");
-        $stmt->execute([$gameId, $today, $slotNumber]);
+        $stmt->execute([$gameId, $playerId, $today, $slotNumber]);
         $card = $stmt->fetch();
         
         if (!$card) {
@@ -43,13 +43,8 @@ function completeChallenge($gameId, $playerId, $slotNumber) {
         ");
         $stmt->execute([$gameId, $playerId]);
         
-        // Mark slot as completed
-        $stmt = $pdo->prepare("
-            UPDATE daily_deck_slots 
-            SET completed_at = NOW(), completed_by_player_id = ?
-            WHERE game_id = ? AND deck_date = ? AND slot_number = ?
-        ");
-        $stmt->execute([$playerId, $gameId, $today, $slotNumber]);
+        // Mark slot as completed AND CLEAR IT
+        completeClearSlot($gameId, $playerId, $slotNumber);
         
         // Clear challenge modify effects
         clearChallengeModifiers($gameId, $playerId);
@@ -82,9 +77,9 @@ function vetoChallenge($gameId, $playerId, $slotNumber) {
             SELECT dds.*, c.*
             FROM daily_deck_slots dds
             JOIN cards c ON dds.card_id = c.id
-            WHERE dds.game_id = ? AND dds.deck_date = ? AND dds.slot_number = ? AND c.card_category = 'challenge'
+            WHERE dds.game_id = ? AND dds.player_id = ? AND dds.deck_date = ? AND dds.slot_number = ? AND c.card_category = 'challenge'
         ");
-        $stmt->execute([$gameId, $today, $slotNumber]);
+        $stmt->execute([$gameId, $playerId, $today, $slotNumber]);
         $card = $stmt->fetch();
         
         if (!$card) {
@@ -122,7 +117,7 @@ function vetoChallenge($gameId, $playerId, $slotNumber) {
         }
         
         // Clear slot
-        clearSlot($gameId, $slotNumber);
+        clearSlot($gameId, $playerId, $slotNumber);
         
         $pdo->commit();
         return ['success' => true, 'penalties' => $penalties];
@@ -152,9 +147,9 @@ function completeBattle($gameId, $playerId, $slotNumber, $isWinner) {
             SELECT dds.*, c.*
             FROM daily_deck_slots dds
             JOIN cards c ON dds.card_id = c.id
-            WHERE dds.game_id = ? AND dds.deck_date = ? AND dds.slot_number = ? AND c.card_category = 'battle'
+            WHERE dds.game_id = ? AND dds.player_id AND dds.deck_date = ? AND dds.slot_number = ? AND c.card_category = 'battle'
         ");
-        $stmt->execute([$gameId, $today, $slotNumber]);
+        $stmt->execute([$gameId, $playerId, $today, $slotNumber]);
         $card = $stmt->fetch();
         
         if (!$card) {
@@ -211,12 +206,7 @@ function completeBattle($gameId, $playerId, $slotNumber, $isWinner) {
         }
         
         // Mark slot as completed
-        $stmt = $pdo->prepare("
-            UPDATE daily_deck_slots 
-            SET completed_at = NOW(), completed_by_player_id = ?
-            WHERE game_id = ? AND deck_date = ? AND slot_number = ?
-        ");
-        $stmt->execute([$playerId, $gameId, $today, $slotNumber]);
+        completeClearSlot($gameId, $playerId, $slotNumber);
         
         $pdo->commit();
         return ['success' => true, 'results' => $results];
@@ -246,9 +236,9 @@ function activateCurse($gameId, $playerId, $slotNumber) {
             SELECT dds.*, c.*
             FROM daily_deck_slots dds
             JOIN cards c ON dds.card_id = c.id
-            WHERE dds.game_id = ? AND dds.deck_date = ? AND dds.slot_number = ? AND c.card_category = 'curse'
+            WHERE dds.game_id = ? AND dds.player_id = ? AND dds.deck_date = ? AND dds.slot_number = ? AND c.card_category = 'curse'
         ");
-        $stmt->execute([$gameId, $today, $slotNumber]);
+        $stmt->execute([$gameId, $playerId, $today, $slotNumber]);
         $card = $stmt->fetch();
         
         if (!$card) {
@@ -262,12 +252,7 @@ function activateCurse($gameId, $playerId, $slotNumber) {
         $effectId = addActiveCurseEffect($gameId, $playerId, $card['card_id'], $card);
         
         // Mark slot as completed
-        $stmt = $pdo->prepare("
-            UPDATE daily_deck_slots 
-            SET completed_at = NOW(), completed_by_player_id = ?
-            WHERE game_id = ? AND deck_date = ? AND slot_number = ?
-        ");
-        $stmt->execute([$playerId, $gameId, $today, $slotNumber]);
+        completeClearSlot($gameId, $playerId, $slotNumber);
         
         $pdo->commit();
         return ['success' => true, 'effects' => $effects, 'effect_id' => $effectId];
@@ -297,9 +282,9 @@ function claimPower($gameId, $playerId, $slotNumber) {
             SELECT dds.*, c.*
             FROM daily_deck_slots dds
             JOIN cards c ON dds.card_id = c.id
-            WHERE dds.game_id = ? AND dds.deck_date = ? AND dds.slot_number = ? AND c.card_category = 'power'
+            WHERE dds.game_id = ? AND dds.player_id = ? AND dds.deck_date = ? AND dds.slot_number = ? AND c.card_category = 'power'
         ");
-        $stmt->execute([$gameId, $today, $slotNumber]);
+        $stmt->execute([$gameId, $playerId, $today, $slotNumber]);
         $card = $stmt->fetch();
         
         if (!$card) {
@@ -312,20 +297,33 @@ function claimPower($gameId, $playerId, $slotNumber) {
             throw new Exception("Hand is full (6 cards maximum)");
         }
         
-        // Add to player's hand
+        // Check if player already has this card in hand
         $stmt = $pdo->prepare("
-            INSERT INTO player_cards (game_id, player_id, card_id, card_type, quantity)
-            VALUES (?, ?, ?, 'power', 1)
+            SELECT id, quantity FROM player_cards 
+            WHERE game_id = ? AND player_id = ? AND card_id = ? AND card_type = 'power'
         ");
         $stmt->execute([$gameId, $playerId, $card['card_id']]);
+        $existing = $stmt->fetch();
         
-        // Mark slot as completed
-        $stmt = $pdo->prepare("
-            UPDATE daily_deck_slots 
-            SET completed_at = NOW(), completed_by_player_id = ?
-            WHERE game_id = ? AND deck_date = ? AND slot_number = ?
-        ");
-        $stmt->execute([$playerId, $gameId, $today, $slotNumber]);
+        if ($existing) {
+            // Update quantity
+            $stmt = $pdo->prepare("
+                UPDATE player_cards 
+                SET quantity = quantity + 1 
+                WHERE id = ?
+            ");
+            $stmt->execute([$existing['id']]);
+        } else {
+            // Add new card to hand
+            $stmt = $pdo->prepare("
+                INSERT INTO player_cards (game_id, player_id, card_id, card_type, quantity)
+                VALUES (?, ?, ?, 'power', 1)
+            ");
+            $stmt->execute([$gameId, $playerId, $card['card_id']]);
+        }
+        
+        // Mark slot as completed and clear it
+        completeClearSlot($gameId, $playerId, $slotNumber);
         
         $pdo->commit();
         return ['success' => true, 'message' => "Added {$card['card_name']} to hand"];
@@ -353,9 +351,9 @@ function discardPower($gameId, $playerId, $slotNumber) {
             SELECT dds.*, c.*
             FROM daily_deck_slots dds
             JOIN cards c ON dds.card_id = c.id
-            WHERE dds.game_id = ? AND dds.deck_date = ? AND dds.slot_number = ? AND c.card_category = 'power'
+            WHERE dds.game_id = ? AND dds.player_id = ? AND dds.deck_date = ? AND dds.slot_number = ? AND c.card_category = 'power'
         ");
-        $stmt->execute([$gameId, $today, $slotNumber]);
+        $stmt->execute([$gameId, $playerId, $today, $slotNumber]);
         $card = $stmt->fetch();
         
         if (!$card) {
@@ -363,7 +361,7 @@ function discardPower($gameId, $playerId, $slotNumber) {
         }
         
         // Clear slot (card is discarded)
-        clearSlot($gameId, $slotNumber);
+        clearSlot($gameId, $playerId, $slotNumber);
         
         return ['success' => true, 'message' => "Discarded {$card['card_name']}"];
         

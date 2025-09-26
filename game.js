@@ -366,7 +366,8 @@ function completeChallenge(slotNumber) {
             playSoundIfEnabled('/card-completed.m4r');
             if (data.points_awarded) {
                 showInAppNotification('Challenge Complete!', `Earned ${data.points_awarded} points`);
-                setTimeout(() => updateScore(gameData.currentPlayerId, data.points_awarded), 1000);
+                // Call refreshGameData directly instead of updateScore
+                setTimeout(() => refreshGameData(), 1000);
             }
             loadDailyDeck();
         } else {
@@ -500,21 +501,7 @@ function toggleHandOverlay() {
     }
 }
 
-function selectDeck(deckType) {
-    currentHandDeck = deckType;
-    
-    // Update deck selector
-    document.querySelectorAll('.deck-option').forEach(option => {
-        option.classList.remove('active');
-    });
-    document.querySelector(`.${deckType}-deck`).classList.add('active');
-    
-    // Update hand display
-    displayHandCards();
-}
-
 function loadHandCards() {
-    
     fetch('game.php', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -524,29 +511,8 @@ function loadHandCards() {
     .then(data => {
         if (data.success) {
             handCards = data.hand;
-            displayHandCards();
-            updateDeckCounts();
+            updateHandSlots();
         }
-    });
-}
-
-function displayHandCards() {
-    const handCardsContainer = document.getElementById('handCards');
-    if (!handCardsContainer) return;
-    
-    // Filter cards by current deck type
-    const filteredCards = handCards.filter(card => card.card_type === currentHandDeck);
-    
-    handCardsContainer.innerHTML = '';
-    
-    if (filteredCards.length === 0) {
-        handCardsContainer.innerHTML = '<p style="color: white; text-align: center; width: 100%;">No cards in this deck</p>';
-        return;
-    }
-    
-    filteredCards.forEach(card => {
-        const cardElement = createHandCardElement(card);
-        handCardsContainer.appendChild(cardElement);
     });
 }
 
@@ -614,17 +580,17 @@ function getHandCardActions(cardType) {
     switch (cardType) {
         case 'power':
             return [
-                { text: 'Play Power Card', onClick: 'playPowerCard' }
+                { text: 'Activate', onClick: 'playPowerCard' }
             ];
         case 'snap':
             return [
-                { text: 'Complete Snap Card', onClick: 'completeSnapCard' },
-                { text: 'Veto Snap Card', onClick: 'vetoSnapCard', class: 'btn-secondary' }
+                { text: 'Complete', onClick: 'completeSnapCard' },
+                { text: 'Veto', onClick: 'vetoSnapCard', class: 'btn-secondary' }
             ];
         case 'spicy':
             return [
-                { text: 'Complete Spicy Card', onClick: 'completeSpicyCard' },
-                { text: 'Veto Spicy Card', onClick: 'vetoSpicyCard', class: 'btn-secondary' }
+                { text: 'Complete', onClick: 'completeSpicyCard' },
+                { text: 'Veto', onClick: 'vetoSpicyCard', class: 'btn-secondary' }
             ];
         default:
             return [];
@@ -788,22 +754,52 @@ function drawSpicyCard() {
     });
 }
 
-function updateDeckCounts() {
-    // Update snap deck count
-    const snapCards = handCards.filter(card => card.card_type === 'snap');
-    const snapCount = snapCards.reduce((sum, card) => sum + card.quantity, 0);
-    const snapDeckCount = document.getElementById('snapDeckCount');
-    if (snapDeckCount) {
-        snapDeckCount.textContent = `${snapCount} Cards in Hand`;
-    }
+function updateHandSlots() {
+    const slots = document.querySelectorAll('.hand-slot');
     
-    // Update spicy deck count  
-    const spicyCards = handCards.filter(card => card.card_type === 'spicy');
-    const spicyCount = spicyCards.reduce((sum, card) => sum + card.quantity, 0);
-    const spicyDeckCount = document.getElementById('spicyDeckCount');
-    if (spicyDeckCount) {
-        spicyDeckCount.textContent = `${spicyCount} Cards in Hand`;
-    }
+    // Clear all slots
+    slots.forEach(slot => {
+        slot.classList.remove('filled');
+        slot.classList.add('empty');
+        slot.innerHTML = '<div class="empty-slot-indicator">Empty</div>';
+    });
+    
+    // Fill slots with cards
+    let slotIndex = 0;
+    handCards.forEach(card => {
+        for (let i = 0; i < card.quantity && slotIndex < 6; i++) {
+            const slot = slots[slotIndex];
+            slot.classList.remove('empty');
+            slot.classList.add('filled');
+            
+            const cardElement = document.createElement('div');
+            cardElement.className = 'hand-slot-card';
+            cardElement.onclick = () => showHandCardActions(card);
+            
+            cardElement.innerHTML = `
+                <div class="hand-slot-card-header">
+                    <div class="hand-slot-card-icon ${card.card_type}">
+                        <i class="fa-solid ${getCardTypeIconClass(card.card_type)}"></i>
+                    </div>
+                    <div class="hand-slot-card-name">${card.card_name}</div>
+                </div>
+                ${card.quantity > 1 ? `<div class="hand-slot-card-quantity">${card.quantity}</div>` : ''}
+            `;
+            
+            slot.innerHTML = '';
+            slot.appendChild(cardElement);
+            slotIndex++;
+        }
+    });
+}
+
+function getCardTypeIconClass(type) {
+    const icons = {
+        'power': 'fa-star',
+        'snap': 'fa-camera-retro',
+        'spicy': 'fa-pepper-hot'
+    };
+    return icons[type] || 'fa-square';
 }
 
 // ========================================
@@ -830,8 +826,9 @@ function checkVetoWait() {
 
 function startVetoWaitDisplay(waitUntil) {
     isVetoWaiting = true;
-    // Create date object from server time string
-    vetoWaitEndTime = new Date(waitUntil.replace(' ', 'T') + 'Z'); // Treat as UTC then convert
+    
+    // Parse the MySQL datetime string directly (it's already in local Indiana time)
+    vetoWaitEndTime = new Date(waitUntil.replace(' ', 'T'));
 
     $('.daily-deck-container').addClass('wait');
     
@@ -1046,11 +1043,14 @@ function refreshGameData() {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            updateScoreDisplay(data.players);
+            try {
+                updateScoreDisplay(data.players);
+            } catch (error) {
+                console.error('Error in updateScoreDisplay:', error);
+            }
             updateGameTimer(data.gametime);
             
             if (data.game_expired && gameData.gameStatus === 'active') {
-                // Auto-end expired game
                 endGame();
             }
         }
@@ -1061,24 +1061,30 @@ function refreshGameData() {
 }
 
 function updateScoreDisplay(players) {
+    
     players.forEach(player => {
-        // Update main score display
-        const scoreElement = document.querySelector(`.player-score:nth-child(${player.id === gameData.currentPlayerId ? '3' : '1'}) .player-score`);
+        const isCurrentPlayer = player.id === gameData.currentPlayerId;
+        
+        // Find the score element using a more specific selector
+        let scoreElement;
+        if (isCurrentPlayer) {
+            scoreElement = document.querySelector('.score-bug .player-score-section.current .player-score');
+        } else {
+            scoreElement = document.querySelector('.score-bug .player-score-section.opponent .player-score');
+        }
+        
+        
         if (scoreElement) {
             animateScoreChange(scoreElement, player.score);
         }
         
-        // Update expanded score display
-        if (player.id === gameData.currentPlayerId) {
+        // Update expanded scores
+        if (isCurrentPlayer) {
             const expandedScore = document.getElementById('expandedCurrentScore');
-            if (expandedScore) {
-                expandedScore.textContent = player.score;
-            }
+            if (expandedScore) expandedScore.textContent = player.score;
         } else {
             const expandedScore = document.getElementById('expandedOpponentScore');
-            if (expandedScore) {
-                expandedScore.textContent = player.score;
-            }
+            if (expandedScore) expandedScore.textContent = player.score;
         }
     });
 }
@@ -1942,7 +1948,6 @@ window.addEventListener('beforeunload', () => {
 // Core Travel Edition functions
 window.handleSlotInteraction = handleSlotInteraction;
 window.toggleHandOverlay = toggleHandOverlay;
-window.selectDeck = selectDeck;
 window.drawSnapCard = drawSnapCard;
 window.drawSpicyCard = drawSpicyCard;
 window.toggleScoreBugExpanded = toggleScoreBugExpanded;

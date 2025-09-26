@@ -98,7 +98,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 exit;
             }
             
+            // Debug: Check if deck exists for this player
+            $stmt = $pdo->prepare("SELECT COUNT(*) FROM daily_decks WHERE game_id = ? AND player_id = ?");
+            $stmt->execute([$player['game_id'], $player['id']]);
+            $deckExists = $stmt->fetchColumn();
+            
             $deckStatus = getDailyDeckStatus($player['game_id'], $player['id']);
+            
+            if (!$deckStatus['success']) {
+                error_log("Debug: No deck status for player {$player['id']}, attempting to generate");
+                $generateResult = generateDailyDeck($player['game_id'], $player['id']);
+                error_log("Debug: Generate result: " . json_encode($generateResult));
+                
+                if ($generateResult['success']) {
+                    $deckStatus = getDailyDeckStatus($player['game_id'], $player['id']);
+                }
+            }
+            
             echo json_encode($deckStatus);
             exit;
 
@@ -323,11 +339,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 exit;
             }
             
+            // Convert current time to Indiana timezone for comparison
+            $timezone = new DateTimeZone('America/Indiana/Indianapolis');
+            $now = new DateTime('now', $timezone);
+            
             $stmt = $pdo->prepare("
                 SELECT veto_wait_until FROM players 
-                WHERE game_id = ? AND id = ? AND veto_wait_until > NOW()
+                WHERE game_id = ? AND id = ? AND veto_wait_until > ?
             ");
-            $stmt->execute([$player['game_id'], $player['id']]);
+            $stmt->execute([$player['game_id'], $player['id'], $now->format('Y-m-d H:i:s')]);
             $waitUntil = $stmt->fetchColumn();
             
             echo json_encode([
@@ -473,6 +493,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $gameExpired = ($now >= $endDate && $player['status'] === 'active');
             
             echo json_encode([
+                'success' => true,
                 'players' => $updatedPlayers,
                 'timers' => $timers,
                 'history' => $history,
@@ -771,30 +792,49 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             <!-- Hand Overlay (swipes down from top) -->
             <div class="hand-overlay" id="handOverlay">
                 <div class="hand-content">
+                    <!-- Draw Decks -->
                     <div class="deck-selector">
-                        <div class="deck-option snap-deck <?= $currentPlayer['gender'] === 'female' ? 'active' : '' ?>" onclick="selectDeck('snap')">
+                        <div class="deck-option snap-deck" onclick="drawSnapCard()">
                             <div class="deck-header">
                                 <div class="deck-title">
                                     <i class="fa-solid fa-camera-retro"></i>
-                                    Snap
+                                    Draw Snap Card
                                 </div>
                             </div>
-                            <div class="deck-count" id="snapDeckCount">24 Cards Remaining</div>
+                            <div class="deck-count">Tap to draw</div>
                         </div>
                         
-                        <div class="deck-option spicy-deck <?= $currentPlayer['gender'] === 'male' ? 'active' : '' ?>" onclick="selectDeck('spicy')">
+                        <div class="deck-option spicy-deck" onclick="drawSpicyCard()">
                             <div class="deck-header">
                                 <div class="deck-title">
                                     <i class="fa-solid fa-pepper-hot"></i>
-                                    Spicy
+                                    Draw Spicy Card
                                 </div>
                             </div>
-                            <div class="deck-count" id="spicyDeckCount">22 Cards Remaining</div>
+                            <div class="deck-count">Tap to draw</div>
                         </div>
                     </div>
                     
-                    <div class="hand-cards" id="handCards">
-                        <!-- Hand cards will be populated here -->
+                    <!-- 6 Card Slots Display -->
+                    <div class="hand-slots" id="handSlots">
+                        <div class="hand-slot empty" data-slot="1">
+                            <div class="empty-slot-indicator">Empty</div>
+                        </div>
+                        <div class="hand-slot empty" data-slot="2">
+                            <div class="empty-slot-indicator">Empty</div>
+                        </div>
+                        <div class="hand-slot empty" data-slot="3">
+                            <div class="empty-slot-indicator">Empty</div>
+                        </div>
+                        <div class="hand-slot empty" data-slot="4">
+                            <div class="empty-slot-indicator">Empty</div>
+                        </div>
+                        <div class="hand-slot empty" data-slot="5">
+                            <div class="empty-slot-indicator">Empty</div>
+                        </div>
+                        <div class="hand-slot empty" data-slot="6">
+                            <div class="empty-slot-indicator">Empty</div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -834,12 +874,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             <!-- Score Bug (bottom) -->
             <div class="score-bug" id="scoreBug" onclick="toggleScoreBugExpanded()">
                 <div class="score-bug-content">
+                    <div class="status-effects opponent-effects" id="opponentStatusEffects">
+                        <!-- Status effect icons will be added here -->
+                    </div>
                     <div class="player-score-section opponent">
                         <div class="player-score"><?= $opponentPlayer['score'] ?></div>
                         <div class="player-name"><?= htmlspecialchars($opponentPlayer['first_name']) ?></div>
-                        <div class="status-effects opponent-effects" id="opponentStatusEffects">
-                            <!-- Status effect icons will be added here -->
-                        </div>
                     </div>
                     
                     <div class="score-divider">
@@ -849,9 +889,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     <div class="player-score-section current">
                         <div class="player-score"><?= $currentPlayer['score'] ?></div>
                         <div class="player-name"><?= htmlspecialchars($currentPlayer['first_name']) ?></div>
-                        <div class="status-effects player-effects" id="playerStatusEffects">
-                            <!-- Status effect icons will be added here -->
-                        </div>
+                    </div>
+                    <div class="status-effects player-effects" id="playerStatusEffects">
+                        <!-- Status effect icons will be added here -->
                     </div>
                 </div>
             </div>
