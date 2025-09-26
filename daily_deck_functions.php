@@ -1,14 +1,14 @@
 <?php
 
-function generateDailyDeck($gameId) {
+function generateDailyDeck($gameId, $playerId) {
     try {
         $pdo = Config::getDatabaseConnection();
         $timezone = new DateTimeZone('America/Indiana/Indianapolis');
         $today = (new DateTime('now', $timezone))->format('Y-m-d');
         
-        // Check if daily deck already exists for today
-        $stmt = $pdo->prepare("SELECT COUNT(*) FROM daily_decks WHERE game_id = ? AND deck_date = ?");
-        $stmt->execute([$gameId, $today]);
+        // Check if daily deck already exists for this player today
+        $stmt = $pdo->prepare("SELECT COUNT(*) FROM daily_decks WHERE game_id = ? AND player_id = ? AND deck_date = ?");
+        $stmt->execute([$gameId, $playerId, $today]);
         if ($stmt->fetchColumn() > 0) {
             return ['success' => true, 'message' => 'Daily deck already exists'];
         }
@@ -26,49 +26,40 @@ function generateDailyDeck($gameId) {
         $pdo->beginTransaction();
         
         // Calculate cards needed for today's deck
-        $cardsPerDay = calculateCardsPerDay($gameId, $daysRemaining);
+        $cardsPerDay = calculateCardsPerDay($gameId, $playerId, $daysRemaining);
         
-        // Get available cards from master deck (exclude used cards)
-        $usedCardIds = getUsedCardIds($gameId);
-        $placeholders = !empty($usedCardIds) ? str_repeat('?,', count($usedCardIds) - 1) . '?' : '';
-        $usedClause = !empty($usedCardIds) ? "AND c.id NOT IN ($placeholders)" : "";
+        // Get used cards for this player
+        $usedCardIds = getUsedCardIds($gameId, $playerId);
         
-        // Select challenge cards
+        // Select cards for this player
         $challengeCards = selectRandomCards($gameId, 'challenge', $cardsPerDay['challenge'], $usedCardIds);
-        
-        // Select curse cards  
         $curseCards = selectRandomCards($gameId, 'curse', $cardsPerDay['curse'], $usedCardIds);
-        
-        // Select power cards
         $powerCards = selectRandomCards($gameId, 'power', $cardsPerDay['power'], $usedCardIds);
-        
-        // Select one battle card (required)
         $battleCards = selectRandomCards($gameId, 'battle', 1, $usedCardIds);
 
         $stmt = $pdo->prepare("SELECT start_date FROM games WHERE id = ?");
         $stmt->execute([$gameId]);
         $gameStartDate = $stmt->fetchColumn();
         
-        // Insert daily deck record
-        $stmt = $pdo->prepare("INSERT INTO daily_decks (game_id, deck_date, game_date, total_cards) VALUES (?, ?, ?, ?)");
+        // Insert daily deck record for this player
+        $stmt = $pdo->prepare("INSERT INTO daily_decks (game_id, player_id, deck_date, game_date, total_cards) VALUES (?, ?, ?, ?, ?)");
         $totalCards = count($challengeCards) + count($curseCards) + count($powerCards) + count($battleCards);
-        $stmt->execute([$gameId, $today, $gameStartDate, $totalCards]);
+        $stmt->execute([$gameId, $playerId, $today, $gameStartDate, $totalCards]);
         $deckId = $pdo->lastInsertId();
         
-        // Insert deck slots (3 slots available)
+        // Insert deck slots for this player
+        for ($slot = 1; $slot <= 3; $slot++) {
+            $stmt = $pdo->prepare("INSERT INTO daily_deck_slots (game_id, player_id, deck_date, game_date, slot_number) VALUES (?, ?, ?, ?, ?)");
+            $stmt->execute([$gameId, $playerId, $today, $gameStartDate, $slot]);
+        }
+        
+        // Store remaining cards for this player
         $allCards = array_merge($challengeCards, $curseCards, $powerCards, $battleCards);
         shuffle($allCards);
         
-        // Insert deck slots
-        for ($slot = 1; $slot <= 3; $slot++) {
-            $stmt = $pdo->prepare("INSERT INTO daily_deck_slots (game_id, deck_date, game_date, slot_number) VALUES (?, ?, ?, ?)");
-            $stmt->execute([$gameId, $today, $gameStartDate, $slot]);
-        }
-        
-        // Store remaining cards for future draws
         foreach ($allCards as $card) {
-            $stmt = $pdo->prepare("INSERT INTO daily_deck_cards (deck_id, card_id, is_used) VALUES (?, ?, 0)");
-            $stmt->execute([$deckId, $card['id']]);
+            $stmt = $pdo->prepare("INSERT INTO daily_deck_cards (deck_id, player_id, card_id, is_used) VALUES (?, ?, ?, 0)");
+            $stmt->execute([$deckId, $playerId, $card['id']]);
         }
         
         $pdo->commit();
@@ -81,7 +72,7 @@ function generateDailyDeck($gameId) {
     }
 }
 
-function calculateCardsPerDay($gameId, $daysRemaining) {
+function calculateCardsPerDay($gameId, $playerId, $daysRemaining) {
     try {
         $pdo = Config::getDatabaseConnection();
         
@@ -101,10 +92,10 @@ function calculateCardsPerDay($gameId, $daysRemaining) {
             FROM daily_deck_cards ddc
             JOIN daily_decks dd ON ddc.deck_id = dd.id
             JOIN cards c ON ddc.card_id = c.id
-            WHERE dd.game_id = ? AND c.card_category IN ('challenge', 'curse', 'power')
+            WHERE dd.game_id = ? AND dd.player_id = ? AND c.card_category IN ('challenge', 'curse', 'power')
             GROUP BY c.card_category
         ");
-        $stmt->execute([$gameId]);
+        $stmt->execute([$gameId, $playerId]);
         $used = $stmt->fetchAll(PDO::FETCH_KEY_PAIR);
         
         $remaining = [
@@ -162,23 +153,23 @@ function selectRandomCards($gameId, $category, $count, $excludeIds = []) {
     }
 }
 
-function getUsedCardIds($gameId) {
+function getUsedCardIds($gameId, $playerId) {
     try {
         $pdo = Config::getDatabaseConnection();
         $stmt = $pdo->prepare("
             SELECT DISTINCT ddc.card_id
             FROM daily_deck_cards ddc
             JOIN daily_decks dd ON ddc.deck_id = dd.id
-            WHERE dd.game_id = ?
+            WHERE dd.game_id = ? AND dd.player_id = ?
         ");
-        $stmt->execute([$gameId]);
+        $stmt->execute([$gameId, $playerId]);
         return $stmt->fetchAll(PDO::FETCH_COLUMN);
     } catch (Exception $e) {
         return [];
     }
 }
 
-function getDailyDeckStatus($gameId) {
+function getDailyDeckStatus($gameId, $playerId) {
     try {
         $pdo = Config::getDatabaseConnection();
         $timezone = new DateTimeZone('America/Indiana/Indianapolis');
@@ -195,13 +186,14 @@ function getDailyDeckStatus($gameId) {
         
         // Get slot status
         $stmt = $pdo->prepare("
-            SELECT dds.*, c.card_name, c.card_category, c.card_description, c.card_points
+            SELECT dds.*, c.card_name, c.card_category, c.card_description, c.card_points,
+                c.veto_subtract, c.veto_steal, c.veto_wait, c.veto_snap, c.veto_spicy, c.timer
             FROM daily_deck_slots dds
             LEFT JOIN cards c ON dds.card_id = c.id
-            WHERE dds.game_id = ? AND dds.deck_date = ?
+            WHERE dds.game_id = ? AND dds.player_id = ? AND dds.deck_date = ?
             ORDER BY dds.slot_number
         ");
-        $stmt->execute([$gameId, $today]);
+        $stmt->execute([$gameId, $playerId, $today]);
         $slots = $stmt->fetchAll();
         
         // Get remaining cards count
@@ -227,7 +219,7 @@ function getDailyDeckStatus($gameId) {
     }
 }
 
-function drawCardToSlot($gameId, $slotNumber) {
+function drawCardToSlot($gameId, $playerId, $slotNumber) {
     try {
         $pdo = Config::getDatabaseConnection();
         $timezone = new DateTimeZone('America/Indiana/Indianapolis');
@@ -238,9 +230,9 @@ function drawCardToSlot($gameId, $slotNumber) {
         // Check if slot is empty
         $stmt = $pdo->prepare("
             SELECT card_id FROM daily_deck_slots 
-            WHERE game_id = ? AND deck_date = ? AND slot_number = ?
+            WHERE game_id = ? AND player_id = ? AND deck_date = ? AND slot_number = ?
         ");
-        $stmt->execute([$gameId, $today, $slotNumber]);
+        $stmt->execute([$gameId, $playerId, $today, $slotNumber]);
         if ($stmt->fetchColumn()) {
             throw new Exception("Slot is already occupied");
         }
@@ -251,11 +243,11 @@ function drawCardToSlot($gameId, $slotNumber) {
             FROM daily_deck_cards ddc
             JOIN daily_decks dd ON ddc.deck_id = dd.id
             JOIN cards c ON ddc.card_id = c.id
-            WHERE dd.game_id = ? AND dd.deck_date = ? AND ddc.is_used = 0
+            WHERE dd.game_id = ? AND dd.deck_date = ? AND ddc.player_id = ? AND ddc.is_used = 0
             ORDER BY RAND()
             LIMIT 1
         ");
-        $stmt->execute([$gameId, $today]);
+        $stmt->execute([$gameId, $today, $playerId]);
         $card = $stmt->fetch();
         
         if (!$card) {
@@ -266,18 +258,18 @@ function drawCardToSlot($gameId, $slotNumber) {
         $stmt = $pdo->prepare("
             UPDATE daily_deck_slots 
             SET card_id = ?, drawn_at = NOW() 
-            WHERE game_id = ? AND deck_date = ? AND slot_number = ?
+            WHERE game_id = ? AND deck_date = ? AND player_id = ? AND slot_number = ?
         ");
-        $stmt->execute([$card['card_id'], $gameId, $today, $slotNumber]);
+        $stmt->execute([$card['card_id'], $gameId, $today, $playerId, $slotNumber]);
         
         // Mark card as used
         $stmt = $pdo->prepare("
             UPDATE daily_deck_cards ddc
             JOIN daily_decks dd ON ddc.deck_id = dd.id
             SET ddc.is_used = 1
-            WHERE dd.game_id = ? AND dd.deck_date = ? AND ddc.card_id = ?
+            WHERE dd.game_id = ? AND dd.deck_date = ? AND ddc.player_id = ? AND ddc.card_id = ?
         ");
-        $stmt->execute([$gameId, $today, $card['card_id']]);
+        $stmt->execute([$gameId, $today, $playerId, $card['card_id']]);
         
         $pdo->commit();
         return ['success' => true, 'card' => $card];
@@ -297,7 +289,7 @@ function clearSlot($gameId, $slotNumber) {
         
         $stmt = $pdo->prepare("
             UPDATE daily_deck_slots 
-            SET card_id = NULL, drawn_at = NULL, completed_at = NULL, completed_by = NULL
+            SET card_id = NULL, drawn_at = NULL, completed_at = NULL, completed_by_player_id = NULL
             WHERE game_id = ? AND deck_date = ? AND slot_number = ?
         ");
         $stmt->execute([$gameId, $today, $slotNumber]);
@@ -327,12 +319,16 @@ function isPlayerWaitingVeto($gameId, $playerId) {
 function applyVetoWait($gameId, $playerId, $minutes) {
     try {
         $pdo = Config::getDatabaseConnection();
+        $timezone = new DateTimeZone('America/Indiana/Indianapolis');
+        $waitUntil = new DateTime('now', $timezone);
+        $waitUntil->add(new DateInterval('PT' . $minutes . 'M'));
+        
         $stmt = $pdo->prepare("
             UPDATE players 
-            SET veto_wait_until = DATE_ADD(NOW(), INTERVAL ? MINUTE)
+            SET veto_wait_until = ?
             WHERE game_id = ? AND id = ?
         ");
-        $stmt->execute([$minutes, $gameId, $playerId]);
+        $stmt->execute([$waitUntil->format('Y-m-d H:i:s'), $gameId, $playerId]);
         return true;
     } catch (Exception $e) {
         error_log("Error applying veto wait: " . $e->getMessage());

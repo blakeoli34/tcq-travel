@@ -46,6 +46,17 @@ foreach ($players as $p) {
 $gameStatus = $gameData['status'];
 $gameMode = $gameData['game_mode'];
 
+// Get travel mode name for body class
+$travelModeClass = '';
+if ($gameData['travel_mode_id']) {
+    $stmt = $pdo->prepare("SELECT mode_title FROM travel_modes WHERE id = ?");
+    $stmt->execute([$gameData['travel_mode_id']]);
+    $modeTitle = $stmt->fetchColumn();
+    if ($modeTitle) {
+        $travelModeClass = strtolower(str_replace(' ', '-', $modeTitle));
+    }
+}
+
 $timezone = new DateTimeZone('America/Indiana/Indianapolis');
 $now = new DateTime('now', $timezone);
 $endDate = new DateTime($player['end_date'], $timezone);
@@ -87,7 +98,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 exit;
             }
             
-            $deckStatus = getDailyDeckStatus($player['game_id']);
+            $deckStatus = getDailyDeckStatus($player['game_id'], $player['id']);
             echo json_encode($deckStatus);
             exit;
 
@@ -97,7 +108,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 exit;
             }
             
-            $result = generateDailyDeck($player['game_id']);
+            $result = generateDailyDeck($player['game_id'], $player['id']);
             echo json_encode($result);
             exit;
 
@@ -113,7 +124,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 exit;
             }
             
-            $result = drawCardToSlot($player['game_id'], $slotNumber);
+            $result = drawCardToSlot($player['game_id'], $player['id'], $slotNumber);
             echo json_encode($result);
             exit;
 
@@ -312,8 +323,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 exit;
             }
             
-            $isWaiting = isPlayerWaitingVeto($player['game_id'], $player['id']);
-            echo json_encode(['success' => true, 'is_waiting' => $isWaiting]);
+            $stmt = $pdo->prepare("
+                SELECT veto_wait_until FROM players 
+                WHERE game_id = ? AND id = ? AND veto_wait_until > NOW()
+            ");
+            $stmt->execute([$player['game_id'], $player['id']]);
+            $waitUntil = $stmt->fetchColumn();
+            
+            echo json_encode([
+                'success' => true, 
+                'is_waiting' => (bool)$waitUntil,
+                'wait_until' => $waitUntil
+            ]);
             exit;
 
         case 'cleanup_expired_effects':
@@ -611,7 +632,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     <link rel="stylesheet" href="/game.css">
 </head>
 <body class="<?php 
-    if($player['gender'] === 'male') { echo 'male'; } else { echo 'female'; }
+    $classes = [];
+    if($player['gender'] === 'male') { $classes[] = 'male'; } else { $classes[] = 'female'; }
+    if($travelModeClass) { $classes[] = $travelModeClass; }
+    echo implode(' ', $classes);
 ?>">
     <div class="container">
         <?php if ($gameStatus === 'waiting' && count($players) < 2): ?>
@@ -782,8 +806,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 </div>
                 
                 <div class="veto-wait-overlay" id="vetoWaitOverlay" style="display: none;">
-                    <div class="veto-message">Game Play Blocked</div>
-                    <div class="veto-countdown" id="vetoCountdown">5:23</div>
+                    <div class="veto-message">Wait to Play</div>
+                    <div class="veto-countdown" id="vetoCountdown">0:00</div>
                 </div>
                 
                 <div class="daily-slots" id="dailySlots">

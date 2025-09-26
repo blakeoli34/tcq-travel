@@ -20,12 +20,8 @@ body {
     touch-action: pan-y;
 }
 
-body.male {
-    background: linear-gradient(135deg, var(--color-blue) 0%, var(--color-pink) 100%);
-}
-
-body:not(.digital) .digital-only {
-    display: none;
+body.beach {
+    background: transparent linear-gradient(180deg, #056CF9 0%, #00AAFA 31%, #F7DBD0 84%, #FCD183 100%) 0% 0% no-repeat padding-box;;
 }
 
 .container {
@@ -61,8 +57,9 @@ body:not(.digital) .digital-only {
     top: 0;
     left: 0;
     width: 100%;
-    height: 100vh;
-    background: rgba(0,0,0,0.8);
+    height: 80vh;
+    border-radius: 0 0 60px 60px;
+    background: rgba(34,34,34,0.7);
     backdrop-filter: blur(8px);
     z-index: 2000;
     transform: translateY(-100%);
@@ -155,6 +152,14 @@ body:not(.digital) .digital-only {
     position: relative;
     margin-top: 60px;
     margin-bottom: 120px;
+    opacity: 0;
+    transform: scale(0.9);
+    transition: all 0.5s;
+}
+
+.daily-deck-container.loaded {
+    transform: scale(1);
+    opacity: 1;
 }
 
 .deck-message {
@@ -172,8 +177,6 @@ body:not(.digital) .digital-only {
     left: 0;
     width: 100%;
     height: 100%;
-    background: rgba(0,0,0,0.8);
-    backdrop-filter: blur(8px);
     z-index: 10;
     display: flex;
     flex-direction: column;
@@ -196,6 +199,11 @@ body:not(.digital) .digital-only {
     font-family: monospace;
 }
 
+.veto-message,
+.veto-countdown {
+    text-shadow: 0 0 10px rgba(0,0,0,0.2);
+}
+
 .daily-slots {
     display: flex;
     flex-direction: column;
@@ -210,15 +218,28 @@ body:not(.digital) .digital-only {
     box-shadow: inset 0 0 10px rgba(0,0,0,0.1);
     border-radius: 25px;
     min-height: 140px;
+    height: fit-content;
     width: 100%;
     max-width: 260px;
     display: flex;
     align-items: center;
     justify-content: center;
+    flex-flow: row wrap;
     cursor: pointer;
     transition: all 0.3s ease;
     position: relative;
     padding: 5px;
+}
+
+.daily-deck-container.wait .daily-slot {
+    pointer-events: none;
+    filter: blur(8px);
+    opacity: 0.5;
+}
+
+.daily-slot.expanded {
+    min-height: 180px;
+    background: rgba(0,0,0,0.4);
 }
 
 .slot-content {
@@ -226,9 +247,6 @@ body:not(.digital) .digital-only {
     height: 100%;
     display: flex;
     flex-direction: column;
-    padding: 20px;
-    background: white;
-    border-radius: 20px;
     min-height: 130px;
 }
 
@@ -243,10 +261,47 @@ body:not(.digital) .digital-only {
     justify-content: center;
 }
 
+.slot-actions {
+    display: flex;
+    justify-content: space-around;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    margin: 0;
+    transition: all 0.3s ease;
+    height: 0;
+    opacity: 0;
+}
+
+.daily-slot.expanded .slot-actions {
+    height: 40px;
+    opacity: 1;
+}
+
+.slot-action-btn {
+    font-size: 16px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    color: white;
+    background: transparent;
+    width: calc(50% - 20px);
+    border: none;
+}
+
+.slot-action-btn.btn-secondary {
+    color: #C62828;
+    background: transparent;
+}
+
 .card-content {
     display: flex;
     flex-direction: column;
     height: 100%;
+    min-height: 130px;
+    padding: 20px;
+    background: white;
+    border-radius: 20px;
 }
 
 .card-header {
@@ -257,15 +312,20 @@ body:not(.digital) .digital-only {
 }
 
 .card-type-icon {
-    width: 40px;
-    height: 40px;
-    border-radius: 50%;
+    width: 30px;
+    height: 30px;
+    border-radius: 7px;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 18px;
+    font-size: 20px;
     color: white;
     flex-shrink: 0;
+    transform: rotate(45deg);
+}
+
+.card-type-icon i {
+    transform: rotate(-45deg);
 }
 
 .card-type-icon.challenge { background: #F39237; }
@@ -279,18 +339,19 @@ body:not(.digital) .digital-only {
 }
 
 .card-name {
-    font-size: 18px;
-    font-weight: 700;
-    color: #333;
+    font-size: 20px;
+    font-weight: 900;
+    color: #3C3C3C;
     line-height: 1.2;
     margin-bottom: 5px;
 }
 
 .card-description {
-    font-size: 14px;
-    color: #666;
+    font-size: 12px;
+    color: #3C3C3C;
     line-height: 1.4;
     flex: 1;
+    width: 100%;
 }
 
 .card-meta {
@@ -309,17 +370,17 @@ body:not(.digital) .digital-only {
 }
 
 .card-badge.points {
-    background: #e3f2fd;
+    background: rgba(21, 101, 192, 0.2);
     color: #1565c0;
 }
 
 .card-badge.timer {
-    background: #fff3e0;
+    background: rgba(239, 108, 0, 0.2);
     color: #ef6c00;
 }
 
 .card-badge.penalty {
-    background: #ffebee;
+    background: rgba(198, 40, 40, 0.2);
     color: #c62828;
 }
 
@@ -404,16 +465,16 @@ body:not(.digital) .digital-only {
     backdrop-filter: blur(12px);
     border-top-left-radius: 30px;
     border-top-right-radius: 30px;
-    padding: 30px 20px;
+    padding: 30px 20px 120px 20px; /* Bottom padding for score bug space */
     transform: translateY(100%);
     transition: transform 0.4s cubic-bezier(0.2, 0.8, 0.3, 1.1);
-    z-index: 1500;
-    max-height: 80vh;
+    z-index: 999; /* Below score bug */
+    max-height: calc(80vh - 120px);
     overflow-y: auto;
 }
 
 .score-bug-expanded.active {
-    transform: translateY(0);
+    transform: translateY(calc(-100% + 120px));
 }
 
 .score-bug-expanded-content {
@@ -1005,9 +1066,30 @@ body:not(.digital) .digital-only {
 
 /* Dark Mode Support */
 @media (prefers-color-scheme: dark) {
+    body.beach {
+        background: transparent linear-gradient(180deg, #07253D 0%, #1C6077 44%, #6CA3B7 71%, #0D1F2B 88%, #02101B 100%) 0% 0% no-repeat padding-box;
+    }
+
+    .score-bug {
+        background: rgba(77, 77, 77, 0.7);
+        border-color: #898989;
+    }
+
     .modal-content {
         background: #171717;
         color: #e6e6e6;
+    }
+
+    .card-content {
+        background: black;
+    }
+
+    .card-name,
+    .card-description,
+    .player-score,
+    .player-name,
+    .score-divider {
+        color: #e2e2e2;
     }
 
     .history-item {

@@ -73,14 +73,55 @@ $(document).ready(function() {
             updateAppBadge(0);
         }
     });
+
+    // Touch gesture handling for hand overlay
+    let touchStartY = 0;
+    let touchEndY = 0;
+
+    $(document).on('touchstart', function(e) {
+        // Don't handle if touching the score bug
+        if ($(e.target).closest('#scoreBug, #scoreBugExpanded').length > 0) {
+            return;
+        }
+        touchStartY = e.originalEvent.changedTouches[0].screenY;
+    });
+
+    $(document).on('touchend', function(e) {
+        // Don't handle if touching the score bug
+        if ($(e.target).closest('#scoreBug, #scoreBugExpanded').length > 0) {
+            return;
+        }
+        
+        touchEndY = e.originalEvent.changedTouches[0].screenY;
+        handleSwipe();
+    });
+
+    function handleSwipe() {
+        const swipeThreshold = 50;
+        const swipeDistance = touchStartY - touchEndY;
+        
+        // Swipe down (negative distance)
+        if (swipeDistance < -swipeThreshold) {
+            if (!handOverlayOpen) {
+                toggleHandOverlay();
+            }
+        }
+        // Swipe up (positive distance) 
+        else if (swipeDistance > swipeThreshold) {
+            if (handOverlayOpen) {
+                toggleHandOverlay();
+            }
+        }
+    }
 });
 
 // ========================================
 // DAILY DECK MANAGEMENT
 // ========================================
 
+let currentDeckState = null;
+
 function loadDailyDeck() {
-    
     fetch('game.php', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -89,9 +130,14 @@ function loadDailyDeck() {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            dailyDeckData = data;
-            updateDailyDeckDisplay(data.slots);
-            updateDeckMessage(data.slots);
+            // Check if deck state has changed
+            const newDeckState = JSON.stringify(data.slots);
+            if (currentDeckState !== newDeckState) {
+                currentDeckState = newDeckState;
+                dailyDeckData = data;
+                updateDailyDeckDisplay(data.slots);
+                updateDeckMessage(data.slots);
+            }
         } else {
             // No deck for today - generate one
             generateDailyDeck();
@@ -136,13 +182,15 @@ function updateDailyDeckDisplay(slots) {
             slotContent.innerHTML = '<div class="empty-slot">TAP TO DRAW A CARD</div>';
         }
     });
+
+    document.querySelector('.daily-deck-container')?.classList.add('loaded');
 }
 
 function createSlotCardHTML(slot) {
     const cardTypeIcons = {
-        'challenge': 'fa-trophy',
-        'curse': 'fa-skull',
-        'power': 'fa-bolt',
+        'challenge': 'fa-flag-checkered',
+        'curse': 'fa-skull-crossbones',
+        'power': 'fa-star',
         'battle': 'fa-swords'
     };
     
@@ -155,6 +203,32 @@ function createSlotCardHTML(slot) {
     if (slot.timer && slot.card_category === 'curse') {
         badges += `<div class="card-badge timer">${slot.timer}m</div>`;
     }
+    if (slot.veto_subtract) {
+        badges += `<div class="card-badge penalty">-${slot.veto_subtract}</div>`;
+    }
+    if (slot.veto_steal) {
+        badges += `<div class="card-badge penalty"><i class="fa-solid fa-hand"></i> ${slot.veto_steal}</div>`;
+    }
+    if (slot.veto_wait) {
+        badges += `<div class="card-badge penalty"><i class="fa-solid fa-circle-pause"></i> ${slot.veto_wait}</div>`;
+    }
+    if (slot.veto_snap) {
+        badges += `<div class="card-badge penalty"><i class="fa-solid fa-camera-retro"></i> ${slot.veto_snap}</div>`;
+    }
+    if (slot.veto_spicy) {
+        badges += `<div class="card-badge penalty"><i class="fa-solid fa-pepper-hot"></i> ${slot.veto_spicy}</div>`;
+    }
+    
+    const actions = getSlotActions(slot.card_category);
+    const actionsHTML = `
+        <div class="slot-actions">
+            ${actions.map(action => `
+                <button class="slot-action-btn ${action.class || ''}" onclick="${action.onClick}(${slot.slot_number || 1})">
+                    ${action.text}
+                </button>
+            `).join('')}
+        </div>
+    `;
     
     return `
         <div class="card-content">
@@ -164,13 +238,14 @@ function createSlotCardHTML(slot) {
                 </div>
                 <div class="card-info">
                     <div class="card-name">${slot.card_name}</div>
-                    <div class="card-description">${slot.card_description}</div>
                 </div>
             </div>
+            <div class="card-description">${slot.card_description}</div>
             <div class="card-meta">
                 ${badges}
             </div>
         </div>
+        ${actionsHTML}
     `;
 }
 
@@ -203,12 +278,24 @@ function handleSlotInteraction(slotNumber) {
     const slot = dailyDeckData.slots[slotNumber - 1];
     
     if (!slot || !slot.card_id) {
-        // Empty slot - draw a card
         drawToSlot(slotNumber);
     } else {
-        // Slot has card - show action options
-        showSlotActions(slotNumber, slot);
+        toggleSlotActions(slotNumber);
     }
+}
+
+function toggleSlotActions(slotNumber) {
+    const slotElement = document.querySelector(`.daily-slot[data-slot="${slotNumber}"]`);
+    
+    // Close other expanded slots first
+    document.querySelectorAll('.daily-slot.expanded').forEach(slot => {
+        if (slot !== slotElement) {
+            slot.classList.remove('expanded');
+        }
+    });
+    
+    // Toggle this slot
+    slotElement.classList.toggle('expanded');
 }
 
 function drawToSlot(slotNumber) {
@@ -228,62 +315,40 @@ function drawToSlot(slotNumber) {
     });
 }
 
-function showSlotActions(slotNumber, slot) {
-    const actions = getSlotActions(slot.card_category);
-    
-    const modal = document.createElement('div');
-    modal.className = 'modal active';
-    modal.innerHTML = `
-        <div class="modal-content">
-            <div class="modal-title">${slot.card_name}</div>
-            <div class="modal-subtitle">${slot.card_description}</div>
-            ${actions.map(action => `
-                <button class="btn ${action.class || ''}" onclick="${action.onClick}(${slotNumber}); closeSlotActions()">
-                    ${action.text}
-                </button>
-            `).join('')}
-            <button class="btn btn-secondary" onclick="closeSlotActions()">Cancel</button>
-        </div>
-    `;
-    
-    document.body.appendChild(modal);
-    modal.id = 'slotActionsModal';
-    setOverlayActive(true);
-}
-
 function getSlotActions(cardCategory) {
     switch (cardCategory) {
         case 'challenge':
             return [
-                { text: 'Complete Challenge', onClick: 'completeChallenge' },
-                { text: 'Veto Challenge', onClick: 'vetoChallenge', class: 'btn-secondary' }
+                { text: 'Complete', onClick: 'completeChallenge' },
+                { text: 'Veto', onClick: 'vetoChallenge', class: 'btn-secondary' }
             ];
         case 'curse':
             return [
-                { text: 'Activate Curse', onClick: 'activateCurse' }
+                { text: 'Activate', onClick: 'activateCurse' }
             ];
         case 'power':
             return [
-                { text: 'Claim Power Card', onClick: 'claimPower' },
-                { text: 'Discard Power Card', onClick: 'discardPower', class: 'btn-secondary' }
+                { text: 'Claim', onClick: 'claimPower' },
+                { text: 'Discard', onClick: 'discardPower', class: 'btn-secondary' }
             ];
         case 'battle':
             return [
-                { text: 'I Won!', onClick: 'winBattle' },
-                { text: 'I Lost', onClick: 'loseBattle', class: 'btn-secondary' }
+                { text: 'Win', onClick: 'winBattle' },
+                { text: 'Lose', onClick: 'loseBattle', class: 'btn-secondary' }
             ];
         default:
             return [];
     }
 }
 
-function closeSlotActions() {
-    const modal = document.getElementById('slotActionsModal');
-    if (modal) {
-        modal.remove();
-        setOverlayActive(false);
+// Close slot actions when clicking outside
+document.addEventListener('click', function(e) {
+    if (!e.target.closest('.daily-slot')) {
+        document.querySelectorAll('.daily-slot.expanded').forEach(slot => {
+            slot.classList.remove('expanded');
+        });
     }
-}
+});
 
 // ========================================
 // CARD ACTIONS
@@ -746,7 +811,6 @@ function updateDeckCounts() {
 // ========================================
 
 function checkVetoWait() {
-    
     fetch('game.php', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -766,7 +830,10 @@ function checkVetoWait() {
 
 function startVetoWaitDisplay(waitUntil) {
     isVetoWaiting = true;
-    vetoWaitEndTime = new Date(waitUntil);
+    // Create date object from server time string
+    vetoWaitEndTime = new Date(waitUntil.replace(' ', 'T') + 'Z'); // Treat as UTC then convert
+
+    $('.daily-deck-container').addClass('wait');
     
     const overlay = document.getElementById('vetoWaitOverlay');
     if (overlay) {
@@ -804,6 +871,8 @@ function updateVetoWaitCountdown() {
 function endVetoWaitDisplay() {
     isVetoWaiting = false;
     vetoWaitEndTime = null;
+
+    $('.daily-deck-container').removeClass('wait');
     
     const overlay = document.getElementById('vetoWaitOverlay');
     if (overlay) {
@@ -1908,7 +1977,6 @@ window.winBattle = winBattle;
 window.loseBattle = loseBattle;
 
 // Modal close functions
-window.closeSlotActions = closeSlotActions;
 window.closeHandCardActions = closeHandCardActions;
 
 // Hand card functions
