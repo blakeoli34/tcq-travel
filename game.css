@@ -75,6 +75,8 @@ body.beach {
 .hand-content {
     width: 100%;
     height: 100%;
+    max-width: 600px;
+    margin: 0 auto;
     overflow-y: auto;
     padding: 20px;
 }
@@ -120,32 +122,27 @@ body.beach {
 }
 
 .hand-slots {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 15px;
-    margin-bottom: 30px;
+    display: flex;
+    flex-flow: row wrap;
+    gap: 10px;
 }
 
 .hand-slot {
     aspect-ratio: 1.85;
-    background: rgba(255,255,255,0.1);
-    border: 2px dashed rgba(255,255,255,0.3);
-    border-radius: 15px;
+    background: rgba(0,0,0,0.2);
+    border-radius: 25px;
+    padding: 5px;
     display: flex;
+    flex-flow: column nowrap;
     align-items: center;
     justify-content: center;
     position: relative;
     transition: all 0.3s ease;
+    width: calc(50% - 5px);
 }
 
-.hand-slot.empty {
-    border-style: dashed;
-}
-
-.hand-slot.filled {
-    border-style: solid;
-    border-color: rgba(255,255,255,0.5);
-    background: rgba(255,255,255,0.2);
+.hand-slot.expanded {
+    aspect-ratio: unset;
 }
 
 .empty-slot-indicator {
@@ -155,49 +152,99 @@ body.beach {
 }
 
 .hand-slot-card {
+    aspect-ratio: 1.85;
     width: 100%;
     height: 100%;
     background: white;
-    border-radius: 12px;
-    padding: 8px;
+    border-radius: 20px;
     display: flex;
     flex-direction: column;
     cursor: pointer;
     transition: transform 0.2s ease;
+    position: relative;
+    min-height: 120px;
 }
 
 .hand-slot-card:hover {
-    transform: scale(1.05);
+    transform: scale(0.98);
+}
+
+.hand-slot-card-content {
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
 }
 
 .hand-slot-card-header {
     display: flex;
     align-items: center;
-    gap: 6px;
-    margin-bottom: 4px;
+    gap: 10px;
+    margin-bottom: 8px;
 }
 
-.hand-slot-card-icon {
-    width: 16px;
-    height: 16px;
-    border-radius: 4px;
+.hand-slot-card-type-icon {
+    width: 24px;
+    height: 24px;
+    border-radius: 6px;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 10px;
+    font-size: 12px;
     color: white;
+    flex-shrink: 0;
+    transform: rotate(45deg);
 }
 
-.hand-slot-card-icon.power { background: #68B684; }
-.hand-slot-card-icon.snap { background: var(--color-pink); }
-.hand-slot-card-icon.spicy { background: var(--color-blue); }
+.hand-slot-card-type-icon i {
+    transform: rotate(-45deg);
+}
+
+.hand-slot-card-type-icon.power { background: #68B684; }
+.hand-slot-card-type-icon.snap { background: var(--color-pink); }
+.hand-slot-card-type-icon.spicy { background: var(--color-blue); }
+
+.hand-slot-card-info {
+    flex: 1;
+}
 
 .hand-slot-card-name {
-    font-size: 10px;
+    font-size: 14px;
     font-weight: 700;
     color: #333;
-    flex: 1;
     line-height: 1.2;
+}
+
+.hand-slot-card-description {
+    font-size: 10px;
+    color: #666;
+    line-height: 1.3;
+    flex: 1;
+}
+
+.hand-slot-card-meta {
+    display: flex;
+    gap: 4px;
+    margin-top: 8px;
+    flex-wrap: wrap;
+}
+
+.hand-slot-card-badge {
+    padding: 2px 6px;
+    border-radius: 8px;
+    font-size: 9px;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.hand-slot-card-badge.points {
+    background: rgba(21, 101, 192, 0.2);
+    color: #1565c0;
+}
+
+.hand-slot-card-badge.penalty {
+    background: rgba(198, 40, 40, 0.2);
+    color: #c62828;
 }
 
 .hand-slot-card-quantity {
@@ -214,6 +261,86 @@ body.beach {
     justify-content: center;
     font-size: 10px;
     font-weight: 700;
+}
+
+.hand-slot-actions {
+    display: flex;
+    justify-content: space-around;
+    align-items: center;
+    gap: 16px;
+    padding: 0;
+    transition: all 0.3s ease;
+    height: 0;
+    opacity: 0;
+    overflow: hidden;
+    width: 100%;
+}
+
+.hand-slot.expanded .hand-slot-actions {
+    height: 40px;
+    opacity: 1;
+    padding: 8px 12px;
+}
+
+.hand-slot-action-btn {
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    color: white;
+    background: transparent !important;
+    border: none;
+    width: calc(50% - 8px);
+}
+
+.hand-slot-action-btn.btn-secondary {
+    color: #c62828;
+}
+
+.hand-indicator {
+    position: fixed;
+    top: 70px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.hand-count {
+    background: rgba(255,255,255,0.9);
+    color: #111;
+    padding: 8px 16px;
+    border-radius: 20px;
+    backdrop-filter: blur(8px);
+    border: solid 1px rgba(255,255,255,0.2);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+    font-size: 14px;
+}
+
+.hand-chevron {
+    color: rgba(255,255,255,0.8);
+    font-size: 16px;
+    animation: bounce 2s infinite;
+}
+
+@keyframes bounce {
+    0%, 20%, 50%, 80%, 100% {
+        transform: translateY(0);
+    }
+    40% {
+        transform: translateY(-3px);
+    }
+    60% {
+        transform: translateY(-2px);
+    }
 }
 
 /* Daily Deck Container */
@@ -459,6 +586,41 @@ body.beach {
     color: #c62828;
 }
 
+.daily-deck-container.downtime .daily-slots {
+    filter: blur(8px);
+    opacity: 0.3;
+    pointer-events: none;
+}
+
+.downtime-overlay {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+}
+
+.downtime-message {
+    color: white;
+    font-size: 24px;
+    font-weight: 700;
+    margin-bottom: 20px;
+    text-shadow: 0 0 10px rgba(0,0,0,0.2);
+}
+
+.downtime-countdown {
+    color: #ff6b6b;
+    font-size: 32px;
+    font-weight: 900;
+    font-family: monospace;
+    text-shadow: 0 0 10px rgba(0,0,0,0.2);
+}
+
 /* Score Bug */
 .score-bug {
     position: fixed;
@@ -466,21 +628,34 @@ body.beach {
     left: 50%;
     width: 70%;
     max-width: 325px;
+    height: 105px;
     background: rgba(255,255,255,0.7);
     border-radius: 30px;
     backdrop-filter: blur(8px);
     border: solid 2px rgba(255,255,255,1);
     cursor: pointer;
     transform: translateX(-50%);
-    transition: all 0.3s ease;
+    transition: all 0.4s ease;
     z-index: 1000;
-    padding: 8px 40px;
+    overflow: hidden;
+}
+
+.score-bug.expanded {
+    height: 120px;
 }
 
 .score-bug-content {
     display: flex;
-    align-items: center;
+    align-items: flex-end;
     justify-content: space-between;
+    height: 100%;
+}
+
+.score-area {
+    width: 100%;
+    display: flex;
+    position: relative;
+    padding: 8px 40px;
 }
 
 .player-score-section {
@@ -517,7 +692,7 @@ body.beach {
 .status-effects {
     display: flex;
     flex-flow: column nowrap;
-    gap: 8px;
+    gap: 4px;
     position: absolute;
     top: 50%;
     left: 10px;
@@ -536,35 +711,28 @@ body.beach {
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 12px;
+    font-size: 10px;
     color: white;
 }
 
 /* Expanded Score Bug */
-.score-bug-expanded {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    background: rgba(255,255,255,0.95);
-    backdrop-filter: blur(12px);
-    border-top-left-radius: 30px;
-    border-top-right-radius: 30px;
-    padding: 30px 20px 120px 20px; /* Bottom padding for score bug space */
-    transform: translateY(100%);
-    transition: transform 0.4s cubic-bezier(0.2, 0.8, 0.3, 1.1);
-    z-index: 999; /* Below score bug */
-    max-height: calc(80vh - 120px);
-    overflow-y: auto;
-}
-
-.score-bug-expanded.active {
-    transform: translateY(calc(-100% + 120px));
-}
-
 .score-bug-expanded-content {
+    position: absolute;
+    bottom: 120px;
+    left: 0;
+    width: 100%;
     max-width: 500px;
     margin: 0 auto;
+    padding: 30px 20px 0 20px;
+    transform: scaleY(0);
+    transform-origin: bottom;
+    opacity: 0;
+    transition: all 0.4s ease;
+}
+
+.score-bug.expanded .score-bug-expanded-content {
+    transform: scaleY(1);
+    opacity: 1;
 }
 
 /* Awards Section */
@@ -684,7 +852,9 @@ body.beach {
 .score-adjustment-row {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: 20px;
+    padding: 0 20px;
 }
 
 .adjustment-column {
@@ -697,6 +867,7 @@ body.beach {
     width: 50px;
     height: 50px;
     border-radius: 50%;
+    background: rgba(0,0,0,0.4);
     border: none;
     display: flex;
     align-items: center;
@@ -710,10 +881,6 @@ body.beach {
 .adjustment-btn:hover {
     transform: scale(1.1);
 }
-
-.adjustment-btn.add { background: #28a745; }
-.adjustment-btn.subtract { background: #dc3545; }
-.adjustment-btn.steal { background: #6f42c1; }
 
 .score-display {
     flex: 1;
@@ -1242,27 +1409,5 @@ body.beach {
         background: rgba(25,25,25,0.9);
         border-color: #222;
         color: #ccc;
-    }
-}
-
-/* Touch and Gesture Support */
-@media (hover: none) and (pointer: coarse) {
-    .daily-slot:hover {
-        background: rgba(255,255,255,0.1);
-        border-color: rgba(255,255,255,0.2);
-    }
-    
-    .deck-option:hover {
-        background: rgba(255,255,255,0.1);
-        border-color: rgba(255,255,255,0.2);
-    }
-    
-    .adjustment-btn:hover {
-        transform: none;
-    }
-    
-    .score-bug:hover {
-        background: rgba(255,255,255,0.9);
-        transform: none;
     }
 }

@@ -788,6 +788,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             <div class="game-timer visible">
                 <?= $gameTimeText ?>
             </div>
+
+            <!-- Hand Indicator -->
+            <div class="hand-indicator" id="handIndicator" onclick="toggleHandOverlay()">
+                <div class="hand-count">
+                    <i class="fa-solid fa-cards-blank"></i>
+                    <span id="handCardCount">0</span>
+                </div>
+                <div class="hand-chevron">
+                    <i class="fa-solid fa-chevron-down"></i>
+                </div>
+            </div>
             
             <!-- Hand Overlay (swipes down from top) -->
             <div class="hand-overlay" id="handOverlay">
@@ -874,116 +885,101 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             <!-- Score Bug (bottom) -->
             <div class="score-bug" id="scoreBug" onclick="toggleScoreBugExpanded()">
                 <div class="score-bug-content">
-                    <div class="status-effects opponent-effects" id="opponentStatusEffects">
-                        <!-- Status effect icons will be added here -->
-                    </div>
-                    <div class="player-score-section opponent">
-                        <div class="player-score"><?= $opponentPlayer['score'] ?></div>
-                        <div class="player-name"><?= htmlspecialchars($opponentPlayer['first_name']) ?></div>
-                    </div>
-                    
-                    <div class="score-divider">
-                        <i class="fa-solid fa-chevron-up" id="expandIcon"></i>
-                    </div>
-                    
-                    <div class="player-score-section current">
-                        <div class="player-score"><?= $currentPlayer['score'] ?></div>
-                        <div class="player-name"><?= htmlspecialchars($currentPlayer['first_name']) ?></div>
-                    </div>
-                    <div class="status-effects player-effects" id="playerStatusEffects">
-                        <!-- Status effect icons will be added here -->
-                    </div>
-                </div>
-            </div>
-            
-            <!-- Expanded Score Bug -->
-            <div class="score-bug-expanded" id="scoreBugExpanded">
-                <div class="score-bug-expanded-content">
-                    <!-- Awards Progress Section -->
-                    <div class="awards-section">
-                        <h3>Awards Progress</h3>
-                        
-                        <div class="award-row">
-                            <div class="award-item">
-                                <div class="award-icon snap-award">
-                                    <i class="fa-solid fa-camera-retro"></i>
+                    <!-- Expanded Content (hidden above) -->
+                    <div class="score-bug-expanded-content" id="scoreBugExpandedContent">
+                        <!-- Awards Progress Section -->
+                        <div class="awards-section">
+                            <h3>Awards Progress</h3>
+                            
+                            <div class="award-row">
+                                <div class="award-item">
+                                    <div class="award-icon snap-award">
+                                        <i class="fa-solid fa-camera-retro"></i>
+                                    </div>
+                                    <div class="award-info">
+                                        <div class="award-level">LEVEL 1</div>
+                                        <div class="award-name">SNAPPY</div>
+                                        <div class="award-progress">1/5 TO NEXT LEVEL</div>
+                                    </div>
                                 </div>
-                                <div class="award-info">
-                                    <div class="award-level">LEVEL 1</div>
-                                    <div class="award-name">SNAPPY</div>
-                                    <div class="award-progress">1/5 TO NEXT LEVEL</div>
+                                
+                                <div class="award-item">
+                                    <div class="award-icon spicy-award">
+                                        <i class="fa-solid fa-pepper-hot"></i>
+                                    </div>
+                                    <div class="award-info">
+                                        <div class="award-level">LEVEL 1</div>
+                                        <div class="award-name">ROMANCE</div>
+                                        <div class="award-progress">0/3 TO NEXT LEVEL</div>
+                                    </div>
                                 </div>
                             </div>
                             
-                            <div class="award-item">
-                                <div class="award-icon spicy-award">
-                                    <i class="fa-solid fa-pepper-hot"></i>
+                            <div class="challenge-master">
+                                <div class="challenge-master-icon">
+                                    <i class="fa-solid fa-trophy"></i>
                                 </div>
-                                <div class="award-info">
-                                    <div class="award-level">LEVEL 1</div>
-                                    <div class="award-name">ROMANCE</div>
-                                    <div class="award-progress">0/3 TO NEXT LEVEL</div>
+                                <div class="challenge-master-info">
+                                    <div class="challenge-master-count">
+                                        <span id="playerChallengeCount">12</span> CHALLENGE MASTER <span id="opponentChallengeCount">11</span>
+                                    </div>
+                                    <div class="challenge-master-desc">+25 to player with most challenges completed by end of game</div>
                                 </div>
                             </div>
                         </div>
                         
-                        <div class="challenge-master">
-                            <div class="challenge-master-icon">
-                                <i class="fa-solid fa-trophy"></i>
-                            </div>
-                            <div class="challenge-master-info">
-                                <div class="challenge-master-count">
-                                    <span id="playerChallengeCount">12</span> CHALLENGE MASTER <span id="opponentChallengeCount">11</span>
+                        <!-- Adjust Score Section -->
+                        <div class="adjust-score-section">
+                            <h3>Adjust Score</h3>
+                            
+                            <div class="score-adjustment-row">
+                                <div class="adjustment-column">
+                                    <button class="adjustment-btn add" onclick="adjustScore('<?= $currentPlayer['id'] ?>', 1)">
+                                        <i class="fa-solid fa-plus"></i>
+                                    </button>
+                                    <button class="adjustment-btn subtract" onclick="adjustScore('<?= $currentPlayer['id'] ?>', -1)">
+                                        <i class="fa-solid fa-minus"></i>
+                                    </button>
+                                    <button class="adjustment-btn steal" onclick="stealPoints('<?= $currentPlayer['id'] ?>', '<?= $opponentPlayer['id'] ?>', 1)">
+                                        <i class="fa-solid fa-hand"></i>
+                                    </button>
                                 </div>
-                                <div class="challenge-master-desc">+25 to player with most challenges completed by end of game</div>
+                                
+                                <div class="adjustment-column">
+                                    <button class="adjustment-btn add" onclick="adjustScore('<?= $opponentPlayer['id'] ?>', 1)">
+                                        <i class="fa-solid fa-plus"></i>
+                                    </button>
+                                    <button class="adjustment-btn subtract" onclick="adjustScore('<?= $opponentPlayer['id'] ?>', -1)">
+                                        <i class="fa-solid fa-minus"></i>
+                                    </button>
+                                    <button class="adjustment-btn steal" onclick="stealPoints('<?= $opponentPlayer['id'] ?>', '<?= $currentPlayer['id'] ?>', 1)">
+                                        <i class="fa-solid fa-hand"></i>
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>
-                    
-                    <!-- Adjust Score Section -->
-                    <div class="adjust-score-section">
-                        <h3>Adjust Score</h3>
+
+                    <div class="score-area">
+                        <!-- Regular Score Content -->
+                        <div class="status-effects opponent-effects" id="opponentStatusEffects">
+                            <!-- Status effect icons will be added here -->
+                        </div>
+                        <div class="player-score-section opponent">
+                            <div class="player-score"><?= $opponentPlayer['score'] ?></div>
+                            <div class="player-name"><?= htmlspecialchars($opponentPlayer['first_name']) ?></div>
+                        </div>
                         
-                        <div class="score-adjustment-row">
-                            <div class="adjustment-column">
-                                <button class="adjustment-btn add" onclick="adjustScore('<?= $currentPlayer['id'] ?>', 1)">
-                                    <i class="fa-solid fa-plus"></i>
-                                </button>
-                                <button class="adjustment-btn subtract" onclick="adjustScore('<?= $currentPlayer['id'] ?>', -1)">
-                                    <i class="fa-solid fa-minus"></i>
-                                </button>
-                                <button class="adjustment-btn steal" onclick="stealPoints('<?= $currentPlayer['id'] ?>', '<?= $opponentPlayer['id'] ?>', 1)">
-                                    <i class="fa-solid fa-hand"></i>
-                                </button>
-                            </div>
-                            
-                            <div class="score-display">
-                                <div class="score-display-opponent">
-                                    <div class="score-value" id="expandedOpponentScore"><?= $opponentPlayer['score'] ?></div>
-                                    <div class="score-name"><?= htmlspecialchars($opponentPlayer['first_name']) ?></div>
-                                </div>
-                                
-                                <div class="score-divider-expanded">
-                                    <i class="fa-solid fa-chevron-down" onclick="toggleScoreBugExpanded()"></i>
-                                </div>
-                                
-                                <div class="score-display-current">
-                                    <div class="score-value" id="expandedCurrentScore"><?= $currentPlayer['score'] ?></div>
-                                    <div class="score-name"><?= htmlspecialchars($currentPlayer['first_name']) ?></div>
-                                </div>
-                            </div>
-                            
-                            <div class="adjustment-column">
-                                <button class="adjustment-btn add" onclick="adjustScore('<?= $opponentPlayer['id'] ?>', 1)">
-                                    <i class="fa-solid fa-plus"></i>
-                                </button>
-                                <button class="adjustment-btn subtract" onclick="adjustScore('<?= $opponentPlayer['id'] ?>', -1)">
-                                    <i class="fa-solid fa-minus"></i>
-                                </button>
-                                <button class="adjustment-btn steal" onclick="stealPoints('<?= $opponentPlayer['id'] ?>', '<?= $currentPlayer['id'] ?>', 1)">
-                                    <i class="fa-solid fa-hand"></i>
-                                </button>
-                            </div>
+                        <div class="score-divider">
+                            <i class="fa-solid fa-chevron-up" id="expandIcon"></i>
+                        </div>
+                        
+                        <div class="player-score-section current">
+                            <div class="player-score"><?= $currentPlayer['score'] ?></div>
+                            <div class="player-name"><?= htmlspecialchars($currentPlayer['first_name']) ?></div>
+                        </div>
+                        <div class="status-effects player-effects" id="playerStatusEffects">
+                            <!-- Status effect icons will be added here -->
                         </div>
                     </div>
                 </div>

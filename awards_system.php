@@ -330,6 +330,21 @@ function getStatusEffectIcons($gameId, $playerId) {
             $icons[] = ['type' => 'power', 'icon' => '⚡', 'color' => '#68B684'];
         }
         
+        // Check for veto wait
+        $pdo = Config::getDatabaseConnection();
+        $timezone = new DateTimeZone('America/Indiana/Indianapolis');
+        $now = new DateTime('now', $timezone);
+        
+        $stmt = $pdo->prepare("
+            SELECT veto_wait_until FROM players 
+            WHERE game_id = ? AND id = ? AND veto_wait_until > ?
+        ");
+        $stmt->execute([$gameId, $playerId, $now->format('Y-m-d H:i:s')]);
+        
+        if ($stmt->fetchColumn()) {
+            $icons[] = ['type' => 'wait', 'icon' => 'fa-circle-pause', 'color' => '#c62828'];
+        }
+        
         return $icons;
         
     } catch (Exception $e) {

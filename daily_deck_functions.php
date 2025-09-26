@@ -1,6 +1,7 @@
 <?php
 
 function generateDailyDeck($gameId, $playerId) {
+    clearExpiredDailyDecks($gameId);
     try {
         $pdo = Config::getDatabaseConnection();
         $timezone = new DateTimeZone('America/Indiana/Indianapolis');
@@ -360,6 +361,37 @@ function applyVetoWait($gameId, $playerId, $minutes) {
         return true;
     } catch (Exception $e) {
         error_log("Error applying veto wait: " . $e->getMessage());
+        return false;
+    }
+}
+
+function clearExpiredDailyDecks($gameId) {
+    try {
+        $pdo = Config::getDatabaseConnection();
+        $timezone = new DateTimeZone('America/Indiana/Indianapolis');
+        $today = (new DateTime('now', $timezone))->format('Y-m-d');
+        
+        // Clear slots from previous days
+        $stmt = $pdo->prepare("
+            UPDATE daily_deck_slots 
+            SET card_id = NULL, drawn_at = NULL, completed_at = NULL, completed_by_player_id = NULL
+            WHERE game_id = ? AND deck_date < ?
+        ");
+        $stmt->execute([$gameId, $today]);
+        
+        // Mark all previous day deck cards as unused
+        $stmt = $pdo->prepare("
+            UPDATE daily_deck_cards ddc
+            JOIN daily_decks dd ON ddc.deck_id = dd.id
+            SET ddc.is_used = 0
+            WHERE dd.game_id = ? AND dd.deck_date < ?
+        ");
+        $stmt->execute([$gameId, $today]);
+        
+        return true;
+        
+    } catch (Exception $e) {
+        error_log("Error clearing expired daily decks: " . $e->getMessage());
         return false;
     }
 }

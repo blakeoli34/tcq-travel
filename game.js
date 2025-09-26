@@ -48,7 +48,9 @@ $(document).ready(function() {
     setupScoreBugHandlers();
     
     setTimeout(() => {
-        loadDailyDeck();
+        if (!checkDowntime()) {
+            loadDailyDeck();
+        }
         checkVetoWait();
         updateStatusEffects();
         loadHandCards();
@@ -56,7 +58,7 @@ $(document).ready(function() {
     
     // Periodic updates
     setInterval(() => {
-        if (!isVetoWaiting) {
+        if (!isVetoWaiting && !checkDowntime()) {
             loadDailyDeck();
         }
         checkVetoWait();
@@ -146,6 +148,82 @@ function loadDailyDeck() {
     .catch(error => {
         console.error('Error loading daily deck:', error);
     });
+}
+
+function checkDowntime() {
+    const timezone = 'America/Indiana/Indianapolis';
+    const now = new Date();
+    const indianaTime = new Date(now.toLocaleString("en-US", {timeZone: timezone}));
+    const hours = indianaTime.getHours();
+    
+    // Downtime is midnight (0) to 8am
+    if (hours >= 0 && hours < 8) {
+        const nextAvailable = new Date(indianaTime);
+        nextAvailable.setHours(8, 0, 0, 0);
+        
+        showDowntimeOverlay(nextAvailable);
+        return true;
+    }
+    
+    hideDowntimeOverlay();
+    return false;
+}
+
+function showDowntimeOverlay(nextAvailable) {
+    const container = document.querySelector('.daily-deck-container');
+    if (!container) return;
+    
+    container.classList.add('downtime');
+    
+    let overlay = document.getElementById('downtimeOverlay');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'downtimeOverlay';
+        overlay.className = 'downtime-overlay';
+        overlay.innerHTML = `
+            <div class="downtime-message">Daily Deck Unavailable</div>
+            <div class="downtime-countdown" id="downtimeCountdown">0:00:00</div>
+        `;
+        container.appendChild(overlay);
+    }
+    
+    overlay.style.display = 'flex';
+    updateDowntimeCountdown(nextAvailable);
+    
+    const countdownInterval = setInterval(() => {
+        if (!updateDowntimeCountdown(nextAvailable)) {
+            clearInterval(countdownInterval);
+            hideDowntimeOverlay();
+            loadDailyDeck();
+        }
+    }, 1000);
+}
+
+function updateDowntimeCountdown(nextAvailable) {
+    const countdown = document.getElementById('downtimeCountdown');
+    if (!countdown) return false;
+    
+    const now = new Date();
+    const diff = nextAvailable - now;
+    
+    if (diff <= 0) {
+        return false;
+    }
+    
+    const hours = Math.floor(diff / (1000 * 60 * 60));
+    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+    const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+    
+    countdown.textContent = `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    return true;
+}
+
+function hideDowntimeOverlay() {
+    const container = document.querySelector('.daily-deck-container');
+    const overlay = document.getElementById('downtimeOverlay');
+    
+    if (container) container.classList.remove('downtime');
+    if (overlay) overlay.style.display = 'none';
 }
 
 function generateDailyDeck() {
@@ -347,6 +425,12 @@ document.addEventListener('click', function(e) {
         document.querySelectorAll('.daily-slot.expanded').forEach(slot => {
             slot.classList.remove('expanded');
         });
+    }
+
+    if (handOverlayOpen && 
+        !e.target.closest('#handOverlay') && 
+        !e.target.closest('#handIndicator')) {
+        toggleHandOverlay();
     }
 });
 
@@ -756,13 +840,18 @@ function drawSpicyCard() {
 
 function updateHandSlots() {
     const slots = document.querySelectorAll('.hand-slot');
+    const handCountEl = document.getElementById('handCardCount');
     
     // Clear all slots
     slots.forEach(slot => {
-        slot.classList.remove('filled');
+        slot.classList.remove('filled', 'expanded');
         slot.classList.add('empty');
         slot.innerHTML = '<div class="empty-slot-indicator">Empty</div>';
     });
+    
+    // Update hand count
+    const totalCards = handCards.reduce((sum, card) => sum + card.quantity, 0);
+    if (handCountEl) handCountEl.textContent = totalCards;
     
     // Fill slots with cards
     let slotIndex = 0;
@@ -772,25 +861,88 @@ function updateHandSlots() {
             slot.classList.remove('empty');
             slot.classList.add('filled');
             
-            const cardElement = document.createElement('div');
-            cardElement.className = 'hand-slot-card';
-            cardElement.onclick = () => showHandCardActions(card);
-            
-            cardElement.innerHTML = `
-                <div class="hand-slot-card-header">
-                    <div class="hand-slot-card-icon ${card.card_type}">
-                        <i class="fa-solid ${getCardTypeIconClass(card.card_type)}"></i>
-                    </div>
-                    <div class="hand-slot-card-name">${card.card_name}</div>
-                </div>
-                ${card.quantity > 1 ? `<div class="hand-slot-card-quantity">${card.quantity}</div>` : ''}
-            `;
-            
-            slot.innerHTML = '';
-            slot.appendChild(cardElement);
+            slot.innerHTML = createHandCardHTML(card, slotIndex);
             slotIndex++;
         }
     });
+}
+
+function createHandCardHTML(card, slotIndex) {
+    const cardTypeIcons = {
+        'power': 'fa-star',
+        'snap': 'fa-camera-retro',
+        'spicy': 'fa-pepper-hot'
+    };
+    
+    const icon = cardTypeIcons[card.card_type] || 'fa-square';
+    
+    let badges = '';
+    if (card.effective_points) {
+        badges += `<div class="hand-slot-card-badge points">+${card.effective_points}</div>`;
+    }
+    if (card.veto_subtract) {
+        badges += `<div class="hand-slot-card-badge penalty">-${card.veto_subtract}</div>`;
+    }
+    if (card.veto_steal) {
+        badges += `<div class="hand-slot-card-badge penalty"><i class="fa-solid fa-hand"></i> ${card.veto_steal}</div>`;
+    }
+    if (card.veto_wait) {
+        badges += `<div class="hand-slot-card-badge penalty"><i class="fa-solid fa-circle-pause"></i> ${card.veto_wait}</div>`;
+    }
+    
+    const actions = getHandCardActions(card.card_type);
+    const actionsHTML = `
+        <div class="hand-slot-actions">
+            ${actions.map(action => `
+                <button class="hand-slot-action-btn ${action.class || ''}" onclick="${action.onClick}(${card.id}); closeHandSlotActions(${slotIndex})">
+                    ${action.text}
+                </button>
+            `).join('')}
+        </div>
+    `;
+    
+    return `
+        <div class="hand-slot-card" onclick="toggleHandSlotActions(${slotIndex})">
+            <div class="hand-slot-card-content">
+                <div class="hand-slot-card-header">
+                    <div class="hand-slot-card-type-icon ${card.card_type}">
+                        <i class="fa-solid ${icon}"></i>
+                    </div>
+                    <div class="hand-slot-card-info">
+                        <div class="hand-slot-card-name">${card.card_name}</div>
+                    </div>
+                </div>
+                <div class="hand-slot-card-description">${card.card_description}</div>
+                <div class="hand-slot-card-meta">
+                    ${badges}
+                </div>
+            </div>
+            ${card.quantity > 1 ? `<div class="hand-slot-card-quantity">${card.quantity}</div>` : ''}
+        </div>
+        ${actionsHTML}
+    `;
+}
+
+function toggleHandSlotActions(slotIndex) {
+    const slots = document.querySelectorAll('.hand-slot');
+    const targetSlot = slots[slotIndex];
+    
+    // Close other expanded slots
+    slots.forEach((slot, index) => {
+        if (index !== slotIndex) {
+            slot.classList.remove('expanded');
+        }
+    });
+    
+    // Toggle target slot
+    targetSlot.classList.toggle('expanded');
+}
+
+function closeHandSlotActions(slotIndex) {
+    const slots = document.querySelectorAll('.hand-slot');
+    if (slots[slotIndex]) {
+        slots[slotIndex].classList.remove('expanded');
+    }
 }
 
 function getCardTypeIconClass(type) {
@@ -907,7 +1059,17 @@ function displayStatusEffects(containerId, effects) {
         const span = document.createElement('span');
         span.className = 'status-effect';
         span.style.backgroundColor = effect.color;
-        span.textContent = effect.icon;
+        
+        if (effect.type === 'curse') {
+            span.innerHTML = '<i class="fa-solid fa-skull-crossbones"></i>';
+        } else if (effect.type === 'power') {
+            span.innerHTML = '<i class="fa-solid fa-star"></i>';
+        } else if (effect.type === 'wait') {
+            span.innerHTML = '<i class="fa-solid fa-circle-pause"></i>';
+        } else {
+            span.textContent = effect.icon;
+        }
+        
         span.title = effect.type;
         container.appendChild(span);
     });
@@ -919,40 +1081,58 @@ function displayStatusEffects(containerId, effects) {
 
 function setupScoreBugHandlers() {
     const scoreBug = document.getElementById('scoreBug');
-    const scoreBugExpanded = document.getElementById('scoreBugExpanded');
     
     if (scoreBug) {
-        scoreBug.addEventListener('click', toggleScoreBugExpanded);
-    }
-    
-    // Close expanded when clicking outside
-    if (scoreBugExpanded) {
-        scoreBugExpanded.addEventListener('click', function(e) {
-            if (e.target === this) {
+        // Add swipe up gesture
+        let touchStartY = 0;
+        scoreBug.addEventListener('touchstart', function(e) {
+            touchStartY = e.touches[0].clientY;
+        });
+        
+        scoreBug.addEventListener('touchend', function(e) {
+            const touchEndY = e.changedTouches[0].clientY;
+            const swipeDistance = touchStartY - touchEndY;
+            
+            if (swipeDistance > 50) { // Swipe up
                 toggleScoreBugExpanded();
             }
         });
     }
+    
+    // Close when clicking outside
+    document.addEventListener('click', function(e) {
+        if (!e.target.closest('#scoreBug') && scoreBug && scoreBug.classList.contains('expanded')) {
+            toggleScoreBugExpanded();
+        }
+    });
 }
 
 function toggleScoreBugExpanded() {
     const scoreBug = document.getElementById('scoreBug');
-    const scoreBugExpandedEl = document.getElementById('scoreBugExpanded');
     const expandIcon = document.getElementById('expandIcon');
+    const expandedContent = document.querySelector('.score-bug-expanded-content');
     
-    if (!scoreBug || !scoreBugExpandedEl) return;
+    if (!scoreBug || !expandIcon || !expandedContent) return;
     
-    scoreBugExpanded = !scoreBugExpanded;
+    const isExpanded = scoreBug.classList.contains('expanded');
     
-    if (scoreBugExpanded) {
-        scoreBugExpandedEl.classList.add('active');
+    if (!isExpanded) {
+        scoreBug.classList.add('expanded');
+        
+        // Calculate and set height
+        const contentHeight = expandedContent.scrollHeight;
+        scoreBug.style.height = `${120 + contentHeight}px`;
+        
         expandIcon.className = 'fa-solid fa-chevron-down';
         loadAwardsInfo();
         setOverlayActive(true);
+        scoreBugExpanded = true;
     } else {
-        scoreBugExpandedEl.classList.remove('active');
+        scoreBug.classList.remove('expanded');
+        scoreBug.style.height = '';
         expandIcon.className = 'fa-solid fa-chevron-up';
         setOverlayActive(false);
+        scoreBugExpanded = false;
     }
 }
 
@@ -1076,15 +1256,6 @@ function updateScoreDisplay(players) {
         
         if (scoreElement) {
             animateScoreChange(scoreElement, player.score);
-        }
-        
-        // Update expanded scores
-        if (isCurrentPlayer) {
-            const expandedScore = document.getElementById('expandedCurrentScore');
-            if (expandedScore) expandedScore.textContent = player.score;
-        } else {
-            const expandedScore = document.getElementById('expandedOpponentScore');
-            if (expandedScore) expandedScore.textContent = player.score;
         }
     });
 }
@@ -1948,6 +2119,8 @@ window.addEventListener('beforeunload', () => {
 // Core Travel Edition functions
 window.handleSlotInteraction = handleSlotInteraction;
 window.toggleHandOverlay = toggleHandOverlay;
+window.toggleHandSlotActions = toggleHandSlotActions;
+window.closeHandSlotActions = closeHandSlotActions;
 window.drawSnapCard = drawSnapCard;
 window.drawSpicyCard = drawSpicyCard;
 window.toggleScoreBugExpanded = toggleScoreBugExpanded;

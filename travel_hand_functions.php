@@ -123,17 +123,13 @@ function completeSnapCard($gameId, $playerId, $playerCardId) {
         // Apply snap/spicy modifiers from active power/curse effects
         $finalPoints = applySnapSpicyModifiers($gameId, $playerId, $card['card_points'], 'snap');
         
-        // Award points
-        if ($finalPoints > 0) {
-            updateScore($gameId, $playerId, $finalPoints, $playerId);
-            $effects[] = "Gained {$finalPoints} points";
-        }
-        
-        // Update snap completion stats and check for awards
+        // Update snap completion stats and check for awards (this handles scoring)
         $awardResult = updateSnapCardCompletion($gameId, $playerId);
         if ($awardResult['award_points'] > 0) {
             $effects[] = "Level {$awardResult['level']} Award: {$awardResult['award_points']} bonus points!";
         }
+        
+        $effects[] = "Gained {$finalPoints} points";
         
         // Check if this completes any curse effects
         $clearedCurses = clearCursesByCompletion($gameId, $playerId, 'snap');
@@ -191,17 +187,13 @@ function completeSpicyCard($gameId, $playerId, $playerCardId) {
         // Apply snap/spicy modifiers from active power/curse effects
         $finalPoints = applySnapSpicyModifiers($gameId, $playerId, $card['card_points'], 'spicy');
         
-        // Award points
-        if ($finalPoints > 0) {
-            updateScore($gameId, $playerId, $finalPoints, $playerId);
-            $effects[] = "Gained {$finalPoints} points";
-        }
-        
-        // Update spicy completion stats and check for awards
+        // Update spicy completion stats and check for awards (this handles scoring)
         $awardResult = updateSpicyCardCompletion($gameId, $playerId);
         if ($awardResult['award_points'] > 0) {
             $effects[] = "Level {$awardResult['level']} Award: {$awardResult['award_points']} bonus points!";
         }
+        
+        $effects[] = "Gained {$finalPoints} points";
         
         // Check if this completes any curse effects
         $clearedCurses = clearCursesByCompletion($gameId, $playerId, 'spicy');
@@ -301,18 +293,17 @@ function drawFromSnapDeck($gameId, $playerId) {
     try {
         $pdo = Config::getDatabaseConnection();
         
-        // Check hand space (max 6 cards)
+        // Check hand space
         $handCount = getPlayerHandCount($gameId, $playerId);
         if ($handCount >= 6) {
             return ['success' => false, 'message' => 'Hand is full (6 cards maximum)'];
         }
         
-        // Get player gender
+        // Get player gender and random card
         $stmt = $pdo->prepare("SELECT gender FROM players WHERE id = ?");
         $stmt->execute([$playerId]);
         $playerGender = $stmt->fetchColumn();
         
-        // Get random snap card for player's gender
         $genderClause = $playerGender === 'male' ? "AND male = 1" : "AND female = 1";
         $stmt = $pdo->prepare("
             SELECT * FROM cards 
@@ -327,14 +318,30 @@ function drawFromSnapDeck($gameId, $playerId) {
             return ['success' => false, 'message' => 'No snap cards available'];
         }
         
-        // Add to hand with points = 2 (standard for drawn cards)
-        $addedCount = addSnapCards($gameId, $playerId, 1);
+        // Add this specific card to hand
+        $stmt = $pdo->prepare("
+            SELECT quantity FROM player_cards 
+            WHERE game_id = ? AND player_id = ? AND card_id = ? AND card_type = 'snap'
+        ");
+        $stmt->execute([$gameId, $playerId, $card['id']]);
+        $existing = $stmt->fetchColumn();
         
-        if ($addedCount > 0) {
-            return ['success' => true, 'card' => $card, 'message' => "Drew {$card['card_name']}"];
+        if ($existing) {
+            $stmt = $pdo->prepare("
+                UPDATE player_cards 
+                SET quantity = quantity + 1 
+                WHERE game_id = ? AND player_id = ? AND card_id = ? AND card_type = 'snap'
+            ");
+            $stmt->execute([$gameId, $playerId, $card['id']]);
         } else {
-            return ['success' => false, 'message' => 'Failed to add card to hand'];
+            $stmt = $pdo->prepare("
+                INSERT INTO player_cards (game_id, player_id, card_id, card_type, quantity, card_points)
+                VALUES (?, ?, ?, 'snap', 1, ?)
+            ");
+            $stmt->execute([$gameId, $playerId, $card['id'], $card['card_points']]);
         }
+        
+        return ['success' => true, 'card' => $card, 'message' => "Drew {$card['card_name']}"];
         
     } catch (Exception $e) {
         error_log("Error drawing from snap deck: " . $e->getMessage());
@@ -346,18 +353,17 @@ function drawFromSpicyDeck($gameId, $playerId) {
     try {
         $pdo = Config::getDatabaseConnection();
         
-        // Check hand space (max 6 cards)
+        // Check hand space
         $handCount = getPlayerHandCount($gameId, $playerId);
         if ($handCount >= 6) {
             return ['success' => false, 'message' => 'Hand is full (6 cards maximum)'];
         }
         
-        // Get player gender
+        // Get player gender and random card
         $stmt = $pdo->prepare("SELECT gender FROM players WHERE id = ?");
         $stmt->execute([$playerId]);
         $playerGender = $stmt->fetchColumn();
         
-        // Get random spicy card for player's gender
         $genderClause = $playerGender === 'male' ? "AND male = 1" : "AND female = 1";
         $stmt = $pdo->prepare("
             SELECT * FROM cards 
@@ -372,14 +378,30 @@ function drawFromSpicyDeck($gameId, $playerId) {
             return ['success' => false, 'message' => 'No spicy cards available'];
         }
         
-        // Add to hand with appropriate points (2 for normal, 4 for extra spicy)
-        $addedCount = addSpicyCards($gameId, $playerId, 1);
+        // Add this specific card to hand
+        $stmt = $pdo->prepare("
+            SELECT quantity FROM player_cards 
+            WHERE game_id = ? AND player_id = ? AND card_id = ? AND card_type = 'spicy'
+        ");
+        $stmt->execute([$gameId, $playerId, $card['id']]);
+        $existing = $stmt->fetchColumn();
         
-        if ($addedCount > 0) {
-            return ['success' => true, 'card' => $card, 'message' => "Drew {$card['card_name']}"];
+        if ($existing) {
+            $stmt = $pdo->prepare("
+                UPDATE player_cards 
+                SET quantity = quantity + 1 
+                WHERE game_id = ? AND player_id = ? AND card_id = ? AND card_type = 'spicy'
+            ");
+            $stmt->execute([$gameId, $playerId, $card['id']]);
         } else {
-            return ['success' => false, 'message' => 'Failed to add card to hand'];
+            $stmt = $pdo->prepare("
+                INSERT INTO player_cards (game_id, player_id, card_id, card_type, quantity, card_points)
+                VALUES (?, ?, ?, 'spicy', 1, ?)
+            ");
+            $stmt->execute([$gameId, $playerId, $card['id'], $card['card_points']]);
         }
+        
+        return ['success' => true, 'card' => $card, 'message' => "Drew {$card['card_name']}"];
         
     } catch (Exception $e) {
         error_log("Error drawing from spicy deck: " . $e->getMessage());
