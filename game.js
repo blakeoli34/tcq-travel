@@ -54,6 +54,7 @@ $(document).ready(function() {
         checkVetoWait();
         updateStatusEffects();
         loadHandCards();
+        updateDeckCounts();
     }, 500);
     
     // Periodic updates
@@ -144,6 +145,7 @@ function loadDailyDeck() {
             // No deck for today - generate one
             generateDailyDeck();
         }
+        updateDailyDeckCount();
     })
     .catch(error => {
         console.error('Error loading daily deck:', error);
@@ -262,6 +264,35 @@ function updateDailyDeckDisplay(slots) {
     });
 
     document.querySelector('.daily-deck-container')?.classList.add('loaded');
+}
+
+function updateDailyDeckCount() {
+    fetch('game.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'action=get_daily_deck_count'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            const countEl = document.getElementById('deckCountText');
+            const containerEl = document.getElementById('dailyDeckCount');
+            if (countEl && containerEl) {
+                countEl.textContent = `Cards remaining: ${data.remaining}`;
+                containerEl.style.display = data.remaining > 0 ? 'block' : 'none';
+            }
+        }
+    });
+}
+
+function animateCardDraw(slotElement) {
+    const cardContent = slotElement.querySelector('.card-content');
+    if (cardContent) {
+        cardContent.classList.add('card-draw-animation');
+        setTimeout(() => {
+            cardContent.classList.remove('card-draw-animation');
+        }, 600);
+    }
 }
 
 function createSlotCardHTML(slot) {
@@ -387,6 +418,13 @@ function drawToSlot(slotNumber) {
         if (data.success) {
             playSoundIfEnabled('/card-drawn.m4r');
             loadDailyDeck();
+            updateDailyDeckCount();
+            
+            // Animate the slot after deck loads
+            setTimeout(() => {
+                const slotEl = document.querySelector(`.daily-slot[data-slot="${slotNumber}"]`);
+                if (slotEl) animateCardDraw(slotEl);
+            }, 100);
         } else {
             alert('Failed to draw card: ' + (data.message || 'Unknown error'));
         }
@@ -569,6 +607,24 @@ function completeBattle(slotNumber, isWinner) {
 // HAND MANAGEMENT
 // ========================================
 
+function updateDeckCounts() {
+    fetch('game.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'action=get_deck_counts'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            const snapCount = document.querySelector('.snap-deck .deck-count');
+            const spicyCount = document.querySelector('.spicy-deck .deck-count');
+            
+            if (snapCount) snapCount.textContent = `${data.snap_count} cards available`;
+            if (spicyCount) spicyCount.textContent = `${data.spicy_count} cards available`;
+        }
+    });
+}
+
 function toggleHandOverlay() {
     const overlay = document.getElementById('handOverlay');
     if (!overlay) return;
@@ -596,6 +652,7 @@ function loadHandCards() {
         if (data.success) {
             handCards = data.hand;
             updateHandSlots();
+            updateDeckCounts();
         }
     });
 }
@@ -1049,6 +1106,61 @@ function updateStatusEffects() {
     });
 }
 
+function showActiveEffectsPopover() {
+    console.log('showActiveEffectsPopover called'); // Debug log
+    fetch('game.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'action=get_active_effects_details'
+    })
+    .then(response => response.json())
+    .then(data => {
+        console.log('Effects data:', data); // Debug log
+        if (data.success) {
+            createEffectsPopover(data.curse_effects, data.power_effects);
+        }
+    });
+}
+
+function createEffectsPopover(curseEffects, powerEffects) {
+    const popover = document.createElement('div');
+    popover.className = 'effects-popover';
+    popover.innerHTML = `
+        <div class="effects-popover-content">
+            <h4>Active Effects</h4>
+            ${curseEffects.map(effect => `
+                <div class="effect-item curse-effect">
+                    <i class="fa-solid fa-skull-crossbones"></i>
+                    <div class="effect-details">
+                        <div class="effect-name">${effect.card_name}</div>
+                        <div class="effect-description">${effect.card_description}</div>
+                        ${effect.expires_at ? `<div class="effect-expires">Expires: ${new Date(effect.expires_at).toLocaleTimeString()}</div>` : ''}
+                    </div>
+                </div>
+            `).join('')}
+            ${powerEffects.map(effect => `
+                <div class="effect-item power-effect">
+                    <i class="fa-solid fa-star"></i>
+                    <div class="effect-details">
+                        <div class="effect-name">${effect.card_name}</div>
+                        <div class="effect-description">${effect.card_description}</div>
+                        ${effect.expires_at ? `<div class="effect-expires">Expires: ${new Date(effect.expires_at).toLocaleTimeString()}</div>` : ''}
+                    </div>
+                </div>
+            `).join('')}
+            <button onclick="closeEffectsPopover()">Close</button>
+        </div>
+    `;
+    
+    document.body.appendChild(popover);
+    setTimeout(() => popover.classList.add('active'), 10);
+}
+
+function closeEffectsPopover() {
+    const popover = document.querySelector('.effects-popover');
+    if (popover) popover.remove();
+}
+
 function displayStatusEffects(containerId, effects) {
     const container = document.getElementById(containerId);
     if (!container) return;
@@ -1059,6 +1171,12 @@ function displayStatusEffects(containerId, effects) {
         const span = document.createElement('span');
         span.className = 'status-effect';
         span.style.backgroundColor = effect.color;
+        span.style.cursor = 'pointer';
+        span.addEventListener('click', function(e) {
+            e.stopPropagation();
+            console.log('Status effect clicked');
+            showActiveEffectsPopover();
+        });
         
         if (effect.type === 'curse') {
             span.innerHTML = '<i class="fa-solid fa-skull-crossbones"></i>';
@@ -1264,31 +1382,53 @@ function animateScoreChange(element, newScore) {
     const currentScore = parseInt(element.textContent) || 0;
     if (currentScore === newScore) return;
     
-    element.classList.add('counting');
+    const scoreDiff = newScore - currentScore;
+    const scoreBug = element.closest('.score-bug');
+    const isCurrentPlayer = element.closest('.player-score-section').classList.contains('current');
+    
+    // Create score flyout
+    const flyout = document.createElement('div');
+    flyout.className = 'score-flyout';
+    flyout.textContent = (scoreDiff > 0 ? '+' : '') + scoreDiff;
+    flyout.style.cssText = `
+        position: absolute;
+        bottom: 10px;
+        ${isCurrentPlayer ? 'right: 20px;' : 'left: 20px;'}
+        font-size: 24px;
+        font-weight: 900;
+        color: #3c3c3c;
+        pointer-events: none;
+        z-index: 1001;
+        opacity: 0;
+    `;
+    scoreBug.appendChild(flyout);
+    
+    // Animate flyout
+    setTimeout(() => {
+        flyout.style.transition = 'all 2000ms cubic-bezier(0.25, 0.46, 0.45, 0.94)';
+        flyout.style.opacity = '1';
+        flyout.style.transform = 'translateY(-120px)';
+        
+        setTimeout(() => {
+            flyout.style.opacity = '0';
+            setTimeout(() => flyout.remove(), 300);
+        }, 1500);
+    }, 10);
+    
+    // Animate score element with 3D rotation
+    element.classList.add('animate');
+    
     playSoundIfEnabled('/score-change.m4r');
     
-    // Animate counter
-    const duration = 1500;
-    const startTime = performance.now();
-    const scoreDiff = newScore - currentScore;
+    // Update score text at 540ms (around 270deg)
+    setTimeout(() => {
+        element.textContent = newScore;
+    }, 540);
     
-    function updateCounter(currentTime) {
-        const elapsed = currentTime - startTime;
-        const progress = Math.min(elapsed / duration, 1);
-        const easeOutQuart = 1 - Math.pow(1 - progress, 4);
-        const current = Math.round(currentScore + (scoreDiff * easeOutQuart));
-        
-        element.textContent = current;
-        
-        if (progress < 1) {
-            requestAnimationFrame(updateCounter);
-        } else {
-            element.textContent = newScore;
-            element.classList.remove('counting');
-        }
-    }
-    
-    requestAnimationFrame(updateCounter);
+    // Remove animate class
+    setTimeout(() => {
+        element.classList.remove('animate');
+    }, 900);
 }
 
 function updateGameTimer(timeText) {

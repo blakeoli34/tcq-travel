@@ -626,8 +626,8 @@ body.beach {
     position: fixed;
     bottom: 20px;
     left: 50%;
-    width: 70%;
-    max-width: 325px;
+    width: fit-content;
+    max-width: 360px;
     height: 105px;
     background: rgba(255,255,255,0.7);
     border-radius: 30px;
@@ -637,7 +637,6 @@ body.beach {
     transform: translateX(-50%);
     transition: all 0.4s ease;
     z-index: 1000;
-    overflow: hidden;
 }
 
 .score-bug.expanded {
@@ -677,7 +676,28 @@ body.beach {
     font-size: 60px;
     font-weight: 700;
     color: #3c3c3c;
-    transition: all 0.3s ease;
+    transition: all 0.4s ease;
+    transform-origin: center center;
+    transform: translateY(0) rotate3d(0,0,0,0deg);
+}
+
+.player-score.animate {
+    animation: scoreAnimate 0.8s ease forwards;
+}
+
+@keyframes scoreAnimate {
+    0% {
+        transform: translateY(0) rotate3d(0,1,0,0deg);
+    }
+    50% {
+        transform: translateY(-80px) rotate3d(0,1,0,180deg);
+    }
+    75% {
+        transform: translateY(-80px) rotate3d(0,1,0,270deg);
+    }
+    100% {
+        transform: translateY(0) rotate3d(0,1,0,360deg);
+    }
 }
 
 .score-divider {
@@ -715,6 +735,68 @@ body.beach {
     color: white;
 }
 
+.effects-popover {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.5);
+    z-index: 2000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.effects-popover.active {
+    opacity: 1;
+}
+
+.effects-popover-content {
+    background: white;
+    border-radius: 15px;
+    padding: 20px;
+    max-width: 400px;
+    max-height: 80vh;
+    overflow-y: auto;
+}
+
+.effect-item {
+    display: flex;
+    gap: 10px;
+    padding: 10px;
+    margin-bottom: 10px;
+    border-radius: 8px;
+}
+
+.curse-effect {
+    background: rgba(103, 89, 122, 0.1);
+    border-left: 3px solid #67597A;
+}
+
+.power-effect {
+    background: rgba(104, 182, 132, 0.1);
+    border-left: 3px solid #68B684;
+}
+
+.effect-name {
+    font-weight: 700;
+    margin-bottom: 5px;
+}
+
+.effect-description {
+    font-size: 12px;
+    color: #666;
+}
+
+.effect-expires {
+    font-size: 10px;
+    color: #999;
+    margin-top: 5px;
+}
+
 /* Expanded Score Bug */
 .score-bug-expanded-content {
     position: absolute;
@@ -728,6 +810,7 @@ body.beach {
     transform-origin: bottom;
     opacity: 0;
     transition: all 0.4s ease;
+    overflow: hidden;
 }
 
 .score-bug.expanded .score-bug-expanded-content {
@@ -1314,6 +1397,34 @@ body.beach {
 .history-change {
     font-weight: 600;
     margin-top: 5px;
+}
+
+.daily-deck-count {
+    text-align: center;
+    color: rgba(255,255,255,0.8);
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 15px;
+}
+
+.card-draw-animation {
+    animation: cardDraw 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+    transform-origin: center center;
+}
+
+@keyframes cardDraw {
+    0% {
+        transform: scale(2) translateY(-50px);
+        opacity: 0.8;
+    }
+    50% {
+        transform: scale(1.2) translateY(-20px);
+        opacity: 0.9;
+    }
+    100% {
+        transform: scale(1) translateY(0);
+        opacity: 1;
+    }
 }
 
 /* Dark Mode Support */

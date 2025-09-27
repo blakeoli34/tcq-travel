@@ -296,6 +296,106 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             echo json_encode(['success' => true, 'hand' => $hand]);
             exit;
 
+        case 'get_deck_counts':
+            if ($gameMode !== 'digital') {
+                echo json_encode(['success' => false, 'message' => 'Not a digital game']);
+                exit;
+            }
+            
+            try {
+                $pdo = Config::getDatabaseConnection();
+                
+                // Get player gender and game travel mode
+                $stmt = $pdo->prepare("
+                    SELECT p.gender, g.travel_mode_id 
+                    FROM players p 
+                    JOIN games g ON p.game_id = g.id 
+                    WHERE p.id = ?
+                ");
+                $stmt->execute([$player['id']]);
+                $gameInfo = $stmt->fetch();
+                
+                $genderClause = $gameInfo['gender'] === 'male' ? "AND c.male = 1" : "AND c.female = 1";
+                
+                // Get total cards available for this travel mode
+                $stmt = $pdo->prepare("
+                    SELECT SUM(c.quantity) 
+                    FROM cards c
+                    JOIN card_travel_modes ctm ON c.id = ctm.card_id
+                    WHERE c.card_category = 'snap' AND ctm.mode_id = ? $genderClause
+                ");
+                $stmt->execute([$gameInfo['travel_mode_id']]);
+                $totalSnap = $stmt->fetchColumn();
+                
+                $stmt = $pdo->prepare("
+                    SELECT SUM(c.quantity) 
+                    FROM cards c
+                    JOIN card_travel_modes ctm ON c.id = ctm.card_id
+                    WHERE c.card_category = 'spicy' AND ctm.mode_id = ? $genderClause
+                ");
+                $stmt->execute([$gameInfo['travel_mode_id']]);
+                $totalSpicy = $stmt->fetchColumn();
+                
+                // Get cards already in player's hand
+                $stmt = $pdo->prepare("
+                    SELECT 
+                        SUM(CASE WHEN card_type = 'snap' THEN quantity ELSE 0 END) as snap_in_hand,
+                        SUM(CASE WHEN card_type = 'spicy' THEN quantity ELSE 0 END) as spicy_in_hand
+                    FROM player_cards 
+                    WHERE game_id = ? AND player_id = ? AND card_type IN ('snap', 'spicy')
+                ");
+                $stmt->execute([$player['game_id'], $player['id']]);
+                $inHand = $stmt->fetch();
+                
+                $stmt = $pdo->prepare("
+                    SELECT 
+                        snap_cards_completed,
+                        spicy_cards_completed
+                    FROM player_stats 
+                    WHERE game_id = ? AND player_id = ?
+                ");
+                $stmt->execute([$player['game_id'], $player['id']]);
+                $completed = $stmt->fetch();
+
+                $snapRemaining = $totalSnap - ($inHand['snap_in_hand'] ?: 0) - ($completed['snap_cards_completed'] ?: 0);
+                $spicyRemaining = $totalSpicy - ($inHand['spicy_in_hand'] ?: 0) - ($completed['spicy_cards_completed'] ?: 0);
+                
+                echo json_encode([
+                    'success' => true,
+                    'snap_count' => max(0, $snapRemaining),
+                    'spicy_count' => max(0, $spicyRemaining)
+                ]);
+            } catch (Exception $e) {
+                echo json_encode(['success' => false, 'message' => 'Failed to get deck counts']);
+            }
+            exit;
+
+        case 'get_daily_deck_count':
+            if ($gameMode !== 'digital') {
+                echo json_encode(['success' => false, 'message' => 'Not a digital game']);
+                exit;
+            }
+            
+            try {
+                $pdo = Config::getDatabaseConnection();
+                $timezone = new DateTimeZone('America/Indiana/Indianapolis');
+                $today = (new DateTime('now', $timezone))->format('Y-m-d');
+                
+                $stmt = $pdo->prepare("
+                    SELECT COUNT(*) 
+                    FROM daily_deck_cards ddc
+                    JOIN daily_decks dd ON ddc.deck_id = dd.id
+                    WHERE dd.game_id = ? AND dd.player_id = ? AND dd.deck_date = ? AND ddc.is_used = 0
+                ");
+                $stmt->execute([$player['game_id'], $player['id'], $today]);
+                $remaining = $stmt->fetchColumn();
+                
+                echo json_encode(['success' => true, 'remaining' => $remaining]);
+            } catch (Exception $e) {
+                echo json_encode(['success' => false, 'remaining' => 0]);
+            }
+            exit;
+
         case 'get_status_effects':
             if ($gameMode !== 'digital') {
                 echo json_encode(['success' => false, 'message' => 'Not a digital game']);
@@ -310,6 +410,48 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 'player_effects' => $icons,
                 'opponent_effects' => $opponentIcons
             ]);
+            exit;
+
+        case 'get_active_effects_details':
+            if ($gameMode !== 'digital') {
+                echo json_encode(['success' => false, 'message' => 'Not a digital game']);
+                exit;
+            }
+            
+            try {
+                $pdo = Config::getDatabaseConnection();
+                
+                // Get active curse effects
+                $stmt = $pdo->prepare("
+                    SELECT ace.*, c.card_name, c.card_description, c.challenge_modify, c.snap_modify, c.spicy_modify,
+                        c.score_modify, c.timer
+                    FROM active_curse_effects ace
+                    JOIN cards c ON ace.card_id = c.id
+                    WHERE ace.game_id = ? AND ace.player_id = ?
+                ");
+                $stmt->execute([$player['game_id'], $player['id']]);
+                $curseEffects = $stmt->fetchAll();
+                
+                // Get active power effects
+                $stmt = $pdo->prepare("
+                    SELECT ape.*, c.card_name, c.card_description, c.power_challenge_modify, c.power_snap_modify, 
+                        c.power_spicy_modify, c.power_score_modify, c.power_wait
+                    FROM active_power_effects ape
+                    JOIN cards c ON ape.power_card_id = c.id
+                    WHERE ape.game_id = ? AND ape.player_id = ?
+                ");
+                $stmt->execute([$player['game_id'], $player['id']]);
+                $powerEffects = $stmt->fetchAll();
+                
+                echo json_encode([
+                    'success' => true,
+                    'curse_effects' => $curseEffects,
+                    'power_effects' => $powerEffects
+                ]);
+            } catch (Exception $e) {
+                error_log("Error getting effects: " . $e->getMessage());
+                echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+            }
             exit;
 
         case 'get_awards_info':
@@ -860,6 +1002,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     <div class="veto-message">Wait to Play</div>
                     <div class="veto-countdown" id="vetoCountdown">0:00</div>
                 </div>
+
+                <div class="daily-deck-count" id="dailyDeckCount" style="display: none;">
+                    <span id="deckCountText">Cards remaining: 0</span>
+                </div>
                 
                 <div class="daily-slots" id="dailySlots">
                     <div class="daily-slot" data-slot="1" onclick="handleSlotInteraction(1)">
@@ -934,18 +1080,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                             
                             <div class="score-adjustment-row">
                                 <div class="adjustment-column">
-                                    <button class="adjustment-btn add" onclick="adjustScore('<?= $currentPlayer['id'] ?>', 1)">
-                                        <i class="fa-solid fa-plus"></i>
-                                    </button>
-                                    <button class="adjustment-btn subtract" onclick="adjustScore('<?= $currentPlayer['id'] ?>', -1)">
-                                        <i class="fa-solid fa-minus"></i>
-                                    </button>
-                                    <button class="adjustment-btn steal" onclick="stealPoints('<?= $currentPlayer['id'] ?>', '<?= $opponentPlayer['id'] ?>', 1)">
-                                        <i class="fa-solid fa-hand"></i>
-                                    </button>
-                                </div>
-                                
-                                <div class="adjustment-column">
                                     <button class="adjustment-btn add" onclick="adjustScore('<?= $opponentPlayer['id'] ?>', 1)">
                                         <i class="fa-solid fa-plus"></i>
                                     </button>
@@ -953,6 +1087,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                                         <i class="fa-solid fa-minus"></i>
                                     </button>
                                     <button class="adjustment-btn steal" onclick="stealPoints('<?= $opponentPlayer['id'] ?>', '<?= $currentPlayer['id'] ?>', 1)">
+                                        <i class="fa-solid fa-hand"></i>
+                                    </button>
+                                </div>
+                                
+                                <div class="adjustment-column">
+                                    <button class="adjustment-btn add" onclick="adjustScore('<?= $currentPlayer['id'] ?>', 1)">
+                                        <i class="fa-solid fa-plus"></i>
+                                    </button>
+                                    <button class="adjustment-btn subtract" onclick="adjustScore('<?= $currentPlayer['id'] ?>', -1)">
+                                        <i class="fa-solid fa-minus"></i>
+                                    </button>
+                                    <button class="adjustment-btn steal" onclick="stealPoints('<?= $currentPlayer['id'] ?>', '<?= $opponentPlayer['id'] ?>', 1)">
                                         <i class="fa-solid fa-hand"></i>
                                     </button>
                                 </div>
