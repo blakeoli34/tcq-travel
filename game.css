@@ -586,6 +586,30 @@ body.beach {
     color: #c62828;
 }
 
+.modifier-badge {
+    position: absolute;
+    top: -5px;
+    left: -5px;
+    background: #68B684;
+    color: white;
+    border-radius: 8px;
+    padding: 2px 6px;
+    font-size: 9px;
+    font-weight: 700;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.modifier-badge.curse {
+    background: #67597A;
+}
+
+.modifier-badge i {
+    font-size: 8px;
+}
+
 .daily-deck-container.downtime .daily-slots {
     filter: blur(8px);
     opacity: 0.3;
@@ -1425,6 +1449,33 @@ body.beach {
         transform: scale(1) translateY(0);
         opacity: 1;
     }
+}
+
+.curse-timer {
+    position: fixed;
+    bottom: 140px;
+    background: rgba(103, 89, 122, 0.9);
+    color: white;
+    padding: 8px 12px;
+    border-radius: 15px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    z-index: 999;
+    backdrop-filter: blur(8px);
+    border: 2px solid rgba(103, 89, 122, 1);
+}
+
+.curse-timer.left {
+    left: 20px;
+}
+
+.curse-timer.right {
+    right: 20px;
+}
+
+.curse-timer i {
+    margin-right: 6px;
 }
 
 /* Dark Mode Support */

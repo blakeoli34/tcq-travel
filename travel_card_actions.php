@@ -246,10 +246,14 @@ function activateCurse($gameId, $playerId, $slotNumber) {
         }
         
         // Process curse effects
-        $effects = processCurseCard($gameId, $playerId, $card);
-        
-        // Create active curse effect
-        $effectId = addActiveCurseEffect($gameId, $playerId, $card['card_id'], $card);
+        $curseResult = processCurseCard($gameId, $playerId, $card);
+        $effects = $curseResult['effects'];
+
+        // Create active curse effect only if not instant
+        $effectId = null;
+        if (!$curseResult['is_instant']) {
+            $effectId = addActiveCurseEffect($gameId, $playerId, $card['card_id'], $card);
+        }
         
         // Mark slot as completed
         completeClearSlot($gameId, $playerId, $slotNumber);
@@ -565,8 +569,9 @@ function clearChallengeModifiers($gameId, $playerId) {
 
 function processCurseCard($gameId, $playerId, $card) {
     $effects = [];
+    $isInstant = true; // Track if this curse should be removed immediately
     
-    // Immediate effects
+    // Instant effects
     if ($card['score_add']) {
         updateScore($gameId, $playerId, $card['score_add'], $playerId);
         $effects[] = "Gained {$card['score_add']} points";
@@ -582,6 +587,13 @@ function processCurseCard($gameId, $playerId, $card) {
         updateScore($gameId, $playerId, -$card['score_steal'], $playerId);
         updateScore($gameId, $opponentId, $card['score_steal'], $playerId);
         $effects[] = "Lost {$card['score_steal']} points to opponent";
+    }
+    
+    // Check for ongoing effects
+    if ($card['challenge_modify'] || $card['snap_modify'] || $card['spicy_modify'] || 
+        $card['timer'] || $card['repeat_count'] || $card['roll_dice'] || 
+        $card['complete_snap'] || $card['complete_spicy']) {
+        $isInstant = false;
     }
     
     // Recurring effects
@@ -609,7 +621,7 @@ function processCurseCard($gameId, $playerId, $card) {
         $effects[] = "Complete a spicy card to clear this curse";
     }
     
-    return $effects;
+    return ['effects' => $effects, 'is_instant' => $isInstant];
 }
 
 function addActiveCurseEffect($gameId, $playerId, $cardId, $card) {
@@ -645,7 +657,7 @@ function addActivePowerEffect($gameId, $playerId, $cardId, $card) {
         }
         
         $stmt = $pdo->prepare("
-            INSERT INTO active_power_effects (game_id, player_id, card_id, expires_at)
+            INSERT INTO active_power_effects (game_id, player_id, power_card_id, expires_at)
             VALUES (?, ?, ?, ?)
         ");
         $stmt->execute([$gameId, $playerId, $cardId, $expiresAt]);
@@ -655,6 +667,246 @@ function addActivePowerEffect($gameId, $playerId, $cardId, $card) {
     } catch (Exception $e) {
         error_log("Error adding active power effect: " . $e->getMessage());
         return false;
+    }
+}
+
+function skipChallenge($gameId, $playerId, $slotNumber) {
+    try {
+        $pdo = Config::getDatabaseConnection();
+        $timezone = new DateTimeZone('America/Indiana/Indianapolis');
+        $today = (new DateTime('now', $timezone))->format('Y-m-d');
+        
+        $pdo->beginTransaction();
+        
+        // Check if player has skip power active
+        $stmt = $pdo->prepare("
+            SELECT ape.*, c.card_name
+            FROM active_power_effects ape
+            JOIN cards c ON ape.card_id = c.id
+            WHERE ape.game_id = ? AND ape.player_id = ? AND c.skip_challenge = 1
+        ");
+        $stmt->execute([$gameId, $playerId]);
+        $skipPower = $stmt->fetch();
+        
+        if (!$skipPower) {
+            throw new Exception("No skip challenge power active");
+        }
+        
+        // Get card in slot
+        $stmt = $pdo->prepare("
+            SELECT dds.*, c.*
+            FROM daily_deck_slots dds
+            JOIN cards c ON dds.card_id = c.id
+            WHERE dds.game_id = ? AND dds.player_id = ? AND dds.deck_date = ? AND dds.slot_number = ?
+        ");
+        $stmt->execute([$gameId, $playerId, $today, $slotNumber]);
+        $card = $stmt->fetch();
+        
+        if (!$card) {
+            throw new Exception("No card in this slot");
+        }
+        
+        // Return card to daily deck
+        $stmt = $pdo->prepare("
+            UPDATE daily_deck_cards ddc
+            JOIN daily_decks dd ON ddc.deck_id = dd.id
+            SET ddc.is_used = 0
+            WHERE dd.game_id = ? AND dd.player_id = ? AND dd.deck_date = ? AND ddc.card_id = ?
+        ");
+        $stmt->execute([$gameId, $playerId, $today, $card['card_id']]);
+        
+        // Clear slot
+        clearSlot($gameId, $playerId, $slotNumber);
+        
+        // Remove skip power effect
+        $stmt = $pdo->prepare("DELETE FROM active_power_effects WHERE id = ?");
+        $stmt->execute([$skipPower['id']]);
+        
+        $pdo->commit();
+        return ['success' => true, 'message' => "Skipped {$card['card_name']} using {$skipPower['card_name']}"];
+        
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        error_log("Error skipping challenge: " . $e->getMessage());
+        return ['success' => false, 'message' => $e->getMessage()];
+    }
+}
+
+function getCurseTimers($gameId, $playerId, $opponentId) {
+    try {
+        $pdo = Config::getDatabaseConnection();
+        
+        // Get player curse timer
+        $stmt = $pdo->prepare("
+            SELECT MIN(expires_at) as expires_at
+            FROM active_curse_effects 
+            WHERE game_id = ? AND player_id = ? AND expires_at IS NOT NULL AND expires_at > NOW()
+        ");
+        $stmt->execute([$gameId, $playerId]);
+        $playerTimer = $stmt->fetch();
+        
+        // Get opponent curse timer
+        $stmt = $pdo->prepare("
+            SELECT MIN(expires_at) as expires_at
+            FROM active_curse_effects 
+            WHERE game_id = ? AND player_id = ? AND expires_at IS NOT NULL AND expires_at > NOW()
+        ");
+        $stmt->execute([$gameId, $opponentId]);
+        $opponentTimer = $stmt->fetch();
+        
+        return [
+            'success' => true,
+            'player_timer' => $playerTimer['expires_at'] ? $playerTimer : null,
+            'opponent_timer' => $opponentTimer['expires_at'] ? $opponentTimer : null
+        ];
+        
+    } catch (Exception $e) {
+        error_log("Error getting curse timers: " . $e->getMessage());
+        return ['success' => false];
+    }
+}
+
+function getActiveModifiers($gameId, $playerId) {
+    try {
+        $pdo = Config::getDatabaseConnection();
+        
+        // Get active curse modifiers
+        $stmt = $pdo->prepare("
+            SELECT c.card_name, c.challenge_modify, c.snap_modify, c.spicy_modify, 'curse' as type
+            FROM active_curse_effects ace
+            JOIN cards c ON ace.card_id = c.id
+            WHERE ace.game_id = ? AND ace.player_id = ? 
+            AND (c.challenge_modify = 1 OR c.snap_modify = 1 OR c.spicy_modify = 1)
+        ");
+        $stmt->execute([$gameId, $playerId]);
+        $curseModifiers = $stmt->fetchAll();
+        
+        // Get active power modifiers
+        $stmt = $pdo->prepare("
+            SELECT c.card_name, c.power_challenge_modify as challenge_modify, 
+                   c.power_snap_modify as snap_modify, c.power_spicy_modify as spicy_modify, 
+                   c.skip_challenge, 'power' as type
+            FROM active_power_effects ape
+            JOIN cards c ON ape.power_card_id = c.id
+            WHERE ape.game_id = ? AND ape.player_id = ? 
+            AND (c.power_challenge_modify = 1 OR c.power_snap_modify = 1 OR c.power_spicy_modify = 1 OR c.skip_challenge = 1)
+        ");
+        $stmt->execute([$gameId, $playerId]);
+        $powerModifiers = $stmt->fetchAll();
+        
+        return [
+            'success' => true,
+            'modifiers' => array_merge($curseModifiers, $powerModifiers)
+        ];
+        
+    } catch (Exception $e) {
+        error_log("Error getting active modifiers: " . $e->getMessage());
+        return ['success' => false, 'modifiers' => []];
+    }
+}
+
+function storeChallengeCard($gameId, $playerId, $slotNumber) {
+    try {
+        $pdo = Config::getDatabaseConnection();
+        $timezone = new DateTimeZone('America/Indiana/Indianapolis');
+        $today = (new DateTime('now', $timezone))->format('Y-m-d');
+        
+        $pdo->beginTransaction();
+        
+        // Check if player has bypass expiration power
+        $stmt = $pdo->prepare("
+            SELECT ape.*, c.card_name
+            FROM active_power_effects ape
+            JOIN cards c ON ape.power_card_id = c.id
+            WHERE ape.game_id = ? AND ape.player_id = ? AND c.bypass_expiration = 1
+        ");
+        $stmt->execute([$gameId, $playerId]);
+        $bypassPower = $stmt->fetch();
+        
+        if (!$bypassPower) {
+            throw new Exception("No bypass expiration power active");
+        }
+        
+        // Get challenge card in slot
+        $stmt = $pdo->prepare("
+            SELECT dds.*, c.*
+            FROM daily_deck_slots dds
+            JOIN cards c ON dds.card_id = c.id
+            WHERE dds.game_id = ? AND dds.player_id = ? AND dds.deck_date = ? AND dds.slot_number = ? AND c.card_category = 'challenge'
+        ");
+        $stmt->execute([$gameId, $playerId, $today, $slotNumber]);
+        $card = $stmt->fetch();
+        
+        if (!$card) {
+            throw new Exception("No challenge card in this slot");
+        }
+        
+        // Add to player's hand as stored challenge
+        $stmt = $pdo->prepare("
+            INSERT INTO player_cards (game_id, player_id, card_id, card_type, quantity, card_points)
+            VALUES (?, ?, ?, 'stored_challenge', 1, ?)
+        ");
+        $stmt->execute([$gameId, $playerId, $card['card_id'], $card['card_points']]);
+        
+        // Clear slot
+        clearSlot($gameId, $playerId, $slotNumber);
+        
+        // Remove bypass power
+        $stmt = $pdo->prepare("DELETE FROM active_power_effects WHERE id = ?");
+        $stmt->execute([$bypassPower['id']]);
+        
+        $pdo->commit();
+        return ['success' => true, 'message' => "Stored {$card['card_name']} for later"];
+        
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        error_log("Error storing challenge: " . $e->getMessage());
+        return ['success' => false, 'message' => $e->getMessage()];
+    }
+}
+
+function peekDailyDeck($gameId, $playerId) {
+    try {
+        $pdo = Config::getDatabaseConnection();
+        $timezone = new DateTimeZone('America/Indiana/Indianapolis');
+        $today = (new DateTime('now', $timezone))->format('Y-m-d');
+        
+        // Check if player has deck peek power
+        $stmt = $pdo->prepare("
+            SELECT ape.*, c.card_name
+            FROM active_power_effects ape
+            JOIN cards c ON ape.power_card_id = c.id
+            WHERE ape.game_id = ? AND ape.player_id = ? AND c.deck_peek = 1
+        ");
+        $stmt->execute([$gameId, $playerId]);
+        $peekPower = $stmt->fetch();
+        
+        if (!$peekPower) {
+            return ['success' => false, 'message' => 'No deck peek power active'];
+        }
+        
+        // Get next 3 cards from daily deck
+        $stmt = $pdo->prepare("
+            SELECT c.*, ddc.id as deck_card_id
+            FROM daily_deck_cards ddc
+            JOIN daily_decks dd ON ddc.deck_id = dd.id
+            JOIN cards c ON ddc.card_id = c.id
+            WHERE dd.game_id = ? AND dd.player_id = ? AND dd.deck_date = ? AND ddc.is_used = 0
+            ORDER BY RAND()
+            LIMIT 3
+        ");
+        $stmt->execute([$gameId, $playerId, $today]);
+        $cards = $stmt->fetchAll();
+        
+        // Remove deck peek power after use
+        $stmt = $pdo->prepare("DELETE FROM active_power_effects WHERE id = ?");
+        $stmt->execute([$peekPower['id']]);
+        
+        return ['success' => true, 'cards' => $cards, 'power_name' => $peekPower['card_name']];
+        
+    } catch (Exception $e) {
+        error_log("Error peeking deck: " . $e->getMessage());
+        return ['success' => false, 'message' => $e->getMessage()];
     }
 }
 ?>

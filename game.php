@@ -509,6 +509,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             echo json_encode(['success' => true]);
             exit;
 
+        case 'skip_challenge':
+            if ($gameMode !== 'digital') {
+                echo json_encode(['success' => false, 'message' => 'Not a digital game']);
+                exit;
+            }
+            
+            $slotNumber = intval($_POST['slot_number']);
+            $result = skipChallenge($player['game_id'], $player['id'], $slotNumber);
+            echo json_encode($result);
+            exit;
+
+        case 'get_curse_timers':
+            if ($gameMode !== 'digital') {
+                echo json_encode(['success' => false, 'message' => 'Not a digital game']);
+                exit;
+            }
+            
+            $result = getCurseTimers($player['game_id'], $player['id'], $opponentPlayer['id']);
+            echo json_encode($result);
+            exit;
+
+        case 'get_active_modifiers':
+            if ($gameMode !== 'digital') {
+                echo json_encode(['success' => false, 'message' => 'Not a digital game']);
+                exit;
+            }
+            
+            $result = getActiveModifiers($player['game_id'], $player['id']);
+            echo json_encode($result);
+            exit;
+
         case 'set_travel_mode':
             $modeId = intval($_POST['mode_id']);
             try {
@@ -566,7 +597,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 echo json_encode(['success' => false, 'message' => 'Failed to set dates']);
             }
             exit;
-            
+
+        case 'store_challenge':
+            $slotNumber = intval($_POST['slot_number']);
+            $result = storeChallengeCard($player['game_id'], $player['id'], $slotNumber);
+            echo json_encode($result);
+            exit;
+
+        case 'peek_deck':
+            $result = peekDailyDeck($player['game_id'], $player['id']);
+            echo json_encode($result);
+            exit;
+                    
         case 'update_score':
             $playerId = intval($_POST['player_id']);
             $points = intval($_POST['points']);
@@ -1080,25 +1122,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                             
                             <div class="score-adjustment-row">
                                 <div class="adjustment-column">
-                                    <button class="adjustment-btn add" onclick="adjustScore('<?= $opponentPlayer['id'] ?>', 1)">
+                                    <button class="adjustment-btn add" onclick="adjustScoreWithInput('<?= $opponentPlayer['id'] ?>', 1)">
                                         <i class="fa-solid fa-plus"></i>
                                     </button>
-                                    <button class="adjustment-btn subtract" onclick="adjustScore('<?= $opponentPlayer['id'] ?>', -1)">
+                                    <button class="adjustment-btn subtract" onclick="adjustScoreWithInput('<?= $opponentPlayer['id'] ?>', -1)">
                                         <i class="fa-solid fa-minus"></i>
                                     </button>
-                                    <button class="adjustment-btn steal" onclick="stealPoints('<?= $opponentPlayer['id'] ?>', '<?= $currentPlayer['id'] ?>', 1)">
+                                    <button class="adjustment-btn steal" onclick="stealPointsWithInput('<?= $opponentPlayer['id'] ?>', '<?= $currentPlayer['id'] ?>')">
                                         <i class="fa-solid fa-hand"></i>
                                     </button>
                                 </div>
                                 
+                                <div class="score-input-container">
+                                    <input type="number" id="scoreAdjustInput" min="1" placeholder="Amount" style="width: 80px; text-align: center; padding: 8px; border-radius: 8px; border: 2px solid #ddd;">
+                                </div>
+                                
                                 <div class="adjustment-column">
-                                    <button class="adjustment-btn add" onclick="adjustScore('<?= $currentPlayer['id'] ?>', 1)">
+                                    <button class="adjustment-btn add" onclick="adjustScoreWithInput('<?= $currentPlayer['id'] ?>', 1)">
                                         <i class="fa-solid fa-plus"></i>
                                     </button>
-                                    <button class="adjustment-btn subtract" onclick="adjustScore('<?= $currentPlayer['id'] ?>', -1)">
+                                    <button class="adjustment-btn subtract" onclick="adjustScoreWithInput('<?= $currentPlayer['id'] ?>', -1)">
                                         <i class="fa-solid fa-minus"></i>
                                     </button>
-                                    <button class="adjustment-btn steal" onclick="stealPoints('<?= $currentPlayer['id'] ?>', '<?= $opponentPlayer['id'] ?>', 1)">
+                                    <button class="adjustment-btn steal" onclick="stealPointsWithInput('<?= $currentPlayer['id'] ?>', '<?= $opponentPlayer['id'] ?>')">
                                         <i class="fa-solid fa-hand"></i>
                                     </button>
                                 </div>
@@ -1129,6 +1175,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                         </div>
                     </div>
                 </div>
+            </div>
+
+            <!-- Curse Timers -->
+            <div class="curse-timer left" id="opponentCurseTimer" style="display: none;" onclick="showActiveEffectsPopover()">
+                <i class="fa-solid fa-skull-crossbones"></i>
+                <span id="playerCurseTime">0:00</span>
+            </div>
+
+            <div class="curse-timer right" id="playerCurseTimer" style="display: none;" onclick="showActiveEffectsPopover()">
+                <i class="fa-solid fa-skull-crossbones"></i>
+                <span id="opponentCurseTime">0:00</span>
             </div>
             
             <!-- Pass game data to JavaScript -->

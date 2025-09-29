@@ -21,27 +21,37 @@ function playPowerCard($gameId, $playerId, $playerCardId) {
         
         $effects = [];
         $opponentId = getOpponentPlayerId($gameId, $playerId);
+        $targetPlayerId = $card['target_opponent'] ? $opponentId : $playerId;
         
         // Apply immediate effects
         if ($card['power_score_add']) {
-            updateScore($gameId, $playerId, $card['power_score_add'], $playerId);
-            $effects[] = "Gained {$card['power_score_add']} points";
-        }
-        
-        if ($card['power_score_subtract']) {
-            if ($card['target_opponent']) {
-                updateScore($gameId, $opponentId, -$card['power_score_subtract'], $playerId);
-                $effects[] = "Opponent lost {$card['power_score_subtract']} points";
+            // Only apply instantly if no snap/spicy modify
+            if (!$card['power_snap_modify'] && !$card['power_spicy_modify']) {
+                updateScore($gameId, $targetPlayerId, $card['power_score_add'], $playerId);
+                $targetName = $card['target_opponent'] ? "Opponent gained" : "Gained";
+                $effects[] = "{$targetName} {$card['power_score_add']} points";
             } else {
-                updateScore($gameId, $playerId, -$card['power_score_subtract'], $playerId);
-                $effects[] = "Lost {$card['power_score_subtract']} points";
+                $effects[] = "Next snap/spicy card will give +{$card['power_score_add']} bonus points";
             }
         }
-        
+
+        if ($card['power_score_subtract']) {
+            updateScore($gameId, $targetPlayerId, -$card['power_score_subtract'], $playerId);
+            $targetName = $card['target_opponent'] ? "Opponent lost" : "Lost";
+            $effects[] = "{$targetName} {$card['power_score_subtract']} points";
+        }
+
         if ($card['power_score_steal']) {
             updateScore($gameId, $opponentId, -$card['power_score_steal'], $playerId);
             updateScore($gameId, $playerId, $card['power_score_steal'], $playerId);
             $effects[] = "Stole {$card['power_score_steal']} points from opponent";
+        }
+
+        // Apply wait to target
+        if ($card['power_wait']) {
+            applyVetoWait($gameId, $targetPlayerId, $card['power_wait']);
+            $targetName = $card['target_opponent'] ? "Opponent" : "You";
+            $effects[] = "{$targetName} cannot interact with deck for {$card['power_wait']} minutes";
         }
         
         // Handle special actions
@@ -55,7 +65,7 @@ function playPowerCard($gameId, $playerId, $playerCardId) {
         }
         
         if ($card['shuffle_daily_deck']) {
-            shuffleDailyDeck($gameId);
+            shuffleDailyDeck($gameId, $playerId);
             $effects[] = "Daily deck shuffled";
         }
         
@@ -99,6 +109,41 @@ function playPowerCard($gameId, $playerId, $playerCardId) {
     }
 }
 
+function applyPowerScoreBonus($gameId, $playerId, $cardType) {
+    try {
+        $pdo = Config::getDatabaseConnection();
+        
+        $modifyField = 'power_' . $cardType . '_modify';
+        $stmt = $pdo->prepare("
+            SELECT ape.*, c.power_score_add
+            FROM active_power_effects ape
+            JOIN cards c ON ape.power_card_id = c.id
+            WHERE ape.game_id = ? AND ape.player_id = ? AND c.$modifyField = 1 AND c.power_score_add > 0
+        ");
+        $stmt->execute([$gameId, $playerId]);
+        $effects = $stmt->fetchAll();
+        
+        $bonus = 0;
+        foreach ($effects as $effect) {
+            $bonus += $effect['power_score_add'];
+            
+            // Remove this power effect after use
+            $stmt = $pdo->prepare("DELETE FROM active_power_effects WHERE id = ?");
+            $stmt->execute([$effect['id']]);
+        }
+        
+        if ($bonus > 0) {
+            updateScore($gameId, $playerId, $bonus, $playerId);
+        }
+        
+        return $bonus;
+        
+    } catch (Exception $e) {
+        error_log("Error applying power score bonus: " . $e->getMessage());
+        return 0;
+    }
+}
+
 function completeSnapCard($gameId, $playerId, $playerCardId) {
     try {
         $pdo = Config::getDatabaseConnection();
@@ -122,6 +167,11 @@ function completeSnapCard($gameId, $playerId, $playerCardId) {
         
         // Apply snap/spicy modifiers from active power/curse effects
         $finalPoints = applySnapSpicyModifiers($gameId, $playerId, $card['card_points'], 'snap');
+
+        $powerBonus = applyPowerScoreBonus($gameId, $playerId, 'snap');
+        if ($powerBonus > 0) {
+            $effects[] = "Power bonus: +{$powerBonus} points";
+        }
         
         // Update snap completion stats and check for awards (this handles scoring)
         $awardResult = updateSnapCardCompletion($gameId, $playerId);
@@ -186,6 +236,11 @@ function completeSpicyCard($gameId, $playerId, $playerCardId) {
         
         // Apply snap/spicy modifiers from active power/curse effects
         $finalPoints = applySnapSpicyModifiers($gameId, $playerId, $card['card_points'], 'spicy');
+
+        $powerBonus = applyPowerScoreBonus($gameId, $playerId, 'spicy');
+        if ($powerBonus > 0) {
+            $effects[] = "Power bonus: +{$powerBonus} points";
+        }
         
         // Update spicy completion stats and check for awards (this handles scoring)
         $awardResult = updateSpicyCardCompletion($gameId, $playerId);
@@ -583,32 +638,46 @@ function clearPlayerCurseEffects($gameId, $playerId) {
     }
 }
 
-function shuffleDailyDeck($gameId) {
+function shuffleDailyDeck($gameId, $playerId) {
     try {
         $pdo = Config::getDatabaseConnection();
         $timezone = new DateTimeZone('America/Indiana/Indianapolis');
         $today = (new DateTime('now', $timezone))->format('Y-m-d');
         
-        // Clear all current slots
+        $pdo->beginTransaction();
+        
+        // Get cards currently in this player's slots
+        $stmt = $pdo->prepare("
+            SELECT card_id FROM daily_deck_slots 
+            WHERE game_id = ? AND player_id = ? AND deck_date = ? AND card_id IS NOT NULL
+        ");
+        $stmt->execute([$gameId, $playerId, $today]);
+        $slotCards = $stmt->fetchAll(PDO::FETCH_COLUMN);
+        
+        // Return slot cards to deck
+        foreach ($slotCards as $cardId) {
+            $stmt = $pdo->prepare("
+                UPDATE daily_deck_cards ddc
+                JOIN daily_decks dd ON ddc.deck_id = dd.id
+                SET ddc.is_used = 0
+                WHERE dd.game_id = ? AND dd.player_id = ? AND dd.deck_date = ? AND ddc.card_id = ?
+            ");
+            $stmt->execute([$gameId, $playerId, $today, $cardId]);
+        }
+        
+        // Clear all slots for this player
         $stmt = $pdo->prepare("
             UPDATE daily_deck_slots 
-            SET card_id = NULL, drawn_at = NULL, completed_at = NULL, completed_by = NULL
-            WHERE game_id = ? AND deck_date = ?
+            SET card_id = NULL, drawn_at = NULL, completed_at = NULL, completed_by_player_id = NULL
+            WHERE game_id = ? AND player_id = ? AND deck_date = ?
         ");
-        $stmt->execute([$gameId, $today]);
+        $stmt->execute([$gameId, $playerId, $today]);
         
-        // Reset all deck cards to unused
-        $stmt = $pdo->prepare("
-            UPDATE daily_deck_cards ddc
-            JOIN daily_decks dd ON ddc.deck_id = dd.id
-            SET ddc.is_used = 0
-            WHERE dd.game_id = ? AND dd.deck_date = ?
-        ");
-        $stmt->execute([$gameId, $today]);
-        
+        $pdo->commit();
         return true;
         
     } catch (Exception $e) {
+        $pdo->rollBack();
         error_log("Error shuffling daily deck: " . $e->getMessage());
         return false;
     }

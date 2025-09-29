@@ -759,7 +759,10 @@ function resetGameForNewRound($gameId) {
         $stmt = $pdo->prepare("DELETE FROM score_history WHERE game_id = ?");
         $stmt->execute([$gameId]);
         
-        // Clear Travel Edition specific data
+        // Clear Travel Edition specific data - in correct order for foreign keys
+        $stmt = $pdo->prepare("DELETE FROM daily_deck_cards WHERE deck_id IN (SELECT id FROM daily_decks WHERE game_id = ?)");
+        $stmt->execute([$gameId]);
+        
         $stmt = $pdo->prepare("DELETE FROM daily_decks WHERE game_id = ?");
         $stmt->execute([$gameId]);
         

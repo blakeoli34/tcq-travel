@@ -61,10 +61,14 @@ $(document).ready(function() {
     setInterval(() => {
         if (!isVetoWaiting && !checkDowntime()) {
             loadDailyDeck();
+            updateSlotActionsForModifiers();
         }
         checkVetoWait();
         updateStatusEffects();
         refreshGameData();
+        updateCurseTimers();
+        updateCardModifiers();
+        checkForDeckPeek();
     }, 5000);
     
     // Setup polling for waiting screens
@@ -226,6 +230,69 @@ function hideDowntimeOverlay() {
     
     if (container) container.classList.remove('downtime');
     if (overlay) overlay.style.display = 'none';
+}
+
+function adjustScoreWithInput(playerId, multiplier) {
+    const input = document.getElementById('scoreAdjustInput');
+    const amount = parseInt(input.value);
+    
+    if (!amount || amount < 1) {
+        alert('Please enter a valid amount (minimum 1)');
+        return;
+    }
+    
+    adjustScore(playerId, amount * multiplier);
+    input.value = '';
+}
+
+function stealPointsWithInput(fromPlayerId, toPlayerId) {
+    const input = document.getElementById('scoreAdjustInput');
+    const amount = parseInt(input.value);
+    
+    if (!amount || amount < 1) {
+        alert('Please enter a valid amount (minimum 1)');
+        return;
+    }
+    
+    stealPoints(fromPlayerId, toPlayerId, amount);
+    input.value = '';
+}
+
+function updateCurseTimers() {
+    fetch('game.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'action=get_curse_timers'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            updateCurseTimerDisplay('playerCurseTimer', 'playerCurseTime', data.player_timer);
+            updateCurseTimerDisplay('opponentCurseTimer', 'opponentCurseTime', data.opponent_timer);
+        }
+    });
+}
+
+function updateCurseTimerDisplay(timerId, timeSpanId, timerData) {
+    const timer = document.getElementById(timerId);
+    const timeSpan = document.getElementById(timeSpanId);
+    
+    if (timerData && timerData.expires_at) {
+        const now = new Date();
+        const expires = new Date(timerData.expires_at);
+        const diff = expires - now;
+        
+        if (diff > 0) {
+            const minutes = Math.floor(diff / (1000 * 60));
+            const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+            timeSpan.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+            timer.style.display = 'block';
+        } else {
+            timer.style.display = 'none';
+        }
+    } else {
+        timer.style.display = 'none';
+    }
 }
 
 function generateDailyDeck() {
@@ -457,6 +524,88 @@ function getSlotActions(cardCategory) {
     }
 }
 
+function updateSlotActionsForModifiers() {
+    fetch('game.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'action=get_active_modifiers'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            const hasSkipPower = data.modifiers.some(m => m.skip_challenge);
+            const hasBypassPower = data.modifiers.some(m => m.bypass_expiration);
+            
+            document.querySelectorAll('.daily-slot .card-content').forEach(cardEl => {
+                const challengeIcon = cardEl.querySelector('.card-type-icon.challenge');
+                if (challengeIcon) {
+                    const actions = cardEl.querySelector('.slot-actions');
+                    if (actions) {
+                        // Add skip button
+                        if (hasSkipPower && !actions.querySelector('.skip-btn')) {
+                            const skipBtn = document.createElement('button');
+                            skipBtn.className = 'slot-action-btn btn-warning skip-btn';
+                            skipBtn.textContent = 'Skip';
+                            skipBtn.onclick = () => {
+                                const slot = cardEl.closest('.daily-slot');
+                                skipChallenge(parseInt(slot.dataset.slot));
+                            };
+                            actions.appendChild(skipBtn);
+                        }
+                        
+                        // Add store button
+                        if (hasBypassPower && !actions.querySelector('.store-btn')) {
+                            const storeBtn = document.createElement('button');
+                            storeBtn.className = 'slot-action-btn btn-secondary store-btn';
+                            storeBtn.textContent = 'Store';
+                            storeBtn.onclick = () => {
+                                const slot = cardEl.closest('.daily-slot');
+                                storeChallenge(parseInt(slot.dataset.slot));
+                            };
+                            actions.appendChild(storeBtn);
+                        }
+                    }
+                }
+            });
+        }
+    });
+}
+
+function storeChallenge(slotNumber) {
+    fetch('game.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: `action=store_challenge&slot_number=${slotNumber}`
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showInAppNotification('Challenge Stored!', data.message);
+            loadDailyDeck();
+            loadHandCards();
+        } else {
+            alert('Failed to store challenge: ' + data.message);
+        }
+    });
+}
+
+function skipChallenge(slotNumber) {
+    fetch('game.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: `action=skip_challenge&slot_number=${slotNumber}`
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            playSoundIfEnabled('/card-completed.m4r');
+            showInAppNotification('Challenge Skipped!', data.message);
+            loadDailyDeck();
+        } else {
+            alert('Failed to skip challenge: ' + data.message);
+        }
+    });
+}
 // Close slot actions when clicking outside
 document.addEventListener('click', function(e) {
     if (!e.target.closest('.daily-slot')) {
@@ -475,6 +624,59 @@ document.addEventListener('click', function(e) {
 // ========================================
 // CARD ACTIONS
 // ========================================
+
+function updateCardModifiers() {
+    fetch('game.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'action=get_active_modifiers'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            addModifierBadges(data.modifiers);
+        }
+    });
+}
+
+function addModifierBadges(modifiers) {
+    // Remove existing badges
+    document.querySelectorAll('.modifier-badge').forEach(badge => badge.remove());
+    
+    modifiers.forEach(modifier => {
+        const cardTypes = [];
+        if (modifier.challenge_modify) cardTypes.push('challenge');
+        if (modifier.snap_modify) cardTypes.push('snap');
+        if (modifier.spicy_modify) cardTypes.push('spicy');
+        if (modifier.skip_challenge) cardTypes.push('challenge');
+        
+        cardTypes.forEach(cardType => {
+            // Add badges to daily deck cards
+            document.querySelectorAll(`.card-type-icon.${cardType}`).forEach(icon => {
+                addBadgeToCard(icon.closest('.card-content'), modifier);
+            });
+            
+            // Add badges to hand cards
+            document.querySelectorAll(`.hand-slot-card-type-icon.${cardType}`).forEach(icon => {
+                addBadgeToCard(icon.closest('.hand-slot-card'), modifier);
+            });
+        });
+    });
+}
+
+function addBadgeToCard(cardElement, modifier) {
+    if (!cardElement || cardElement.querySelector('.modifier-badge')) return;
+    
+    const badge = document.createElement('div');
+    badge.className = `modifier-badge ${modifier.type}`;
+    badge.innerHTML = `
+        <i class="fa-solid ${modifier.type === 'curse' ? 'fa-skull-crossbones' : 'fa-star'}"></i>
+        ${modifier.card_name}
+    `;
+    
+    cardElement.style.position = 'relative';
+    cardElement.appendChild(badge);
+}
 
 function completeChallenge(slotNumber) {
     fetch('game.php', {
@@ -687,6 +889,7 @@ function createHandCardElement(card) {
 
 function getCardTypeIcon(type) {
     const icons = {
+        'challenge': '<i class="fa-solid fa-flag-checkered"></i> Challenge',
         'power': '<i class="fa-solid fa-bolt"></i> Power',
         'snap': '<i class="fa-solid fa-camera-retro"></i> Snap',
         'spicy': '<i class="fa-solid fa-pepper-hot"></i> Spicy'
@@ -744,6 +947,75 @@ function closeHandCardActions() {
         modal.remove();
         setOverlayActive(false);
     }
+}
+
+function checkForDeckPeek() {
+    fetch('game.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'action=get_active_modifiers'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success && data.modifiers.some(m => m.deck_peek)) {
+            showDeckPeekButton();
+        }
+    });
+}
+
+function showDeckPeekButton() {
+    const deckContainer = document.querySelector('.daily-deck-container');
+    if (!deckContainer.querySelector('.peek-btn')) {
+        const peekBtn = document.createElement('button');
+        peekBtn.className = 'btn peek-btn';
+        peekBtn.textContent = '👁️ Peek Deck';
+        peekBtn.style.marginBottom = '20px';
+        peekBtn.onclick = peekDeck;
+        deckContainer.insertBefore(peekBtn, deckContainer.firstChild);
+    }
+}
+
+function peekDeck() {
+    fetch('game.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'action=peek_deck'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showDeckPeekOverlay(data.cards, data.power_name);
+            document.querySelector('.peek-btn')?.remove();
+        } else {
+            alert('Failed to peek deck: ' + data.message);
+        }
+    });
+}
+
+function showDeckPeekOverlay(cards, powerName) {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal active';
+    overlay.innerHTML = `
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-title">Deck Peek - ${powerName}</div>
+            <div class="modal-subtitle">Next 3 cards in your daily deck:</div>
+            <div style="display: flex; flex-direction: column; gap: 15px; margin: 20px 0;">
+                ${cards.map(card => `
+                    <div style="display: flex; align-items: center; gap: 15px; padding: 15px; background: #f8f9fa; border-radius: 10px;">
+                        <div class="card-type-icon ${card.card_category}" style="transform: none;">
+                            <i class="fa-solid ${getCardTypeIcon(card.card_category)}"></i>
+                        </div>
+                        <div>
+                            <div style="font-weight: 700; margin-bottom: 5px;">${card.card_name}</div>
+                            <div style="font-size: 12px; color: #666;">${card.card_description}</div>
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+            <button class="btn" onclick="this.closest('.modal').remove()">Close</button>
+        </div>
+    `;
+    document.body.appendChild(overlay);
 }
 
 // Hand card action functions
@@ -1004,6 +1276,7 @@ function closeHandSlotActions(slotIndex) {
 
 function getCardTypeIconClass(type) {
     const icons = {
+        'challenge': 'fa-flag-checkered',
         'power': 'fa-star',
         'snap': 'fa-camera-retro',
         'spicy': 'fa-pepper-hot'
