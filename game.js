@@ -282,6 +282,9 @@ function updateCurseTimerDisplay(timerId, timeSpanId, timerData) {
     const timer = document.getElementById(timerId);
     const timeSpan = document.getElementById(timeSpanId);
     
+    // Guard: elements don't exist during onboarding
+    if (!timer || !timeSpan) return;
+    
     if (timerData && timerData.expires_at) {
         const now = new Date();
         const expires = new Date(timerData.expires_at);
@@ -364,14 +367,14 @@ function updateDailyDeckCount() {
 
 function updateDailyGameClock() {
     const clockElement = document.getElementById('dailyGameClock');
-    if (!clockElement || !gameData || gameData.gameStatus !== 'active') return;
+    if (!clockElement || !gameData || gameData.gameStatus !== 'active' || !gameData.startDate) return;
     
     const timezone = 'America/Indiana/Indianapolis';
     const now = new Date();
     const indianaTime = new Date(now.toLocaleString("en-US", {timeZone: timezone}));
     
     // Calculate day of game
-    const startDate = new Date(gameData.startDate + 'T08:00:00');
+    const startDate = new Date(gameData.startDate.replace(' ', 'T'));
     const daysSinceStart = Math.floor((indianaTime - startDate) / (1000 * 60 * 60 * 24));
     const gameDay = daysSinceStart + 1;
     
@@ -392,9 +395,9 @@ function updateDailyGameClock() {
     // Format based on time remaining
     let timeText;
     if (hours > 0) {
-        timeText = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+        timeText = `${hours}:${minutes.toString().padStart(2, '0')}`;
     } else {
-        timeText = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+        timeText = `${minutes}:${seconds.toString().padStart(2, '0')}`;
     }
     
     clockElement.querySelector('.game-day').textContent = `Day ${gameDay}`;
@@ -1546,13 +1549,32 @@ function setupScoreBugHandlers() {
     const scoreBug = document.getElementById('scoreBug');
     
     if (scoreBug) {
+        // Prevent input clicks from toggling
+        const input = document.getElementById('scoreAdjustInput');
+        if (input) {
+            input.addEventListener('click', function(e) {
+                e.stopPropagation();
+            });
+            input.addEventListener('touchstart', function(e) {
+                e.stopPropagation();
+            });
+            input.addEventListener('touchend', function(e) {
+                e.stopPropagation();
+            });
+        }
+
         // Add swipe up gesture
         let touchStartY = 0;
         scoreBug.addEventListener('touchstart', function(e) {
+            // Don't handle if touching input
+            if (e.target.id === 'scoreAdjustInput' || e.target.closest('#scoreAdjustInput')) return;
             touchStartY = e.touches[0].clientY;
         });
-        
+
         scoreBug.addEventListener('touchend', function(e) {
+            // Don't handle if touching input
+            if (e.target.id === 'scoreAdjustInput' || e.target.closest('#scoreAdjustInput')) return;
+            
             const touchEndY = e.changedTouches[0].clientY;
             const swipeDistance = touchStartY - touchEndY;
             
@@ -1562,9 +1584,12 @@ function setupScoreBugHandlers() {
         });
     }
     
-    // Close when clicking outside
+    // Close when clicking outside (but not on input)
     document.addEventListener('click', function(e) {
-        if (!e.target.closest('#scoreBug') && scoreBug && scoreBug.classList.contains('expanded')) {
+        if (!e.target.closest('#scoreBug') && 
+            !e.target.closest('#scoreAdjustInput') &&
+            scoreBug && 
+            scoreBug.classList.contains('expanded')) {
             toggleScoreBugExpanded();
         }
     });

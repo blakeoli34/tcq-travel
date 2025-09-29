@@ -824,7 +824,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover, maximum-scale=1.0">
-    <title>The Couple's Quest</title>
+    <title>TCQ Travel Edition</title>
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="<?= Config::COLOR_BLUE ?>">
@@ -1157,7 +1157,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                                 </div>
                                 
                                 <div class="score-input-container">
-                                    <input type="number" id="scoreAdjustInput" min="1" placeholder="Amount" style="width: 80px; text-align: center; padding: 8px; border-radius: 8px; border: 2px solid #ddd;">
+                                    <input type="number" id="scoreAdjustInput" min="1" placeholder="Amount" pattern="\d*" style="width: 80px; text-align: center; padding: 8px; border-radius: 8px; border: 2px solid #ddd;">
                                 </div>
                                 
                                 <div class="adjustment-column">

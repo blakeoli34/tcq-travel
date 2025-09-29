@@ -2,6 +2,17 @@
 
 function generateDailyDeck($gameId, $playerId) {
     clearExpiredDailyDecks($gameId);
+
+    // PREVENT INFINITE GENERATION
+    $cacheKey = "deck_gen_{$gameId}_{$playerId}_" . date('Y-m-d');
+    $lockFile = sys_get_temp_dir() . "/$cacheKey.lock";
+    
+    if (file_exists($lockFile) && (time() - filemtime($lockFile)) < 60) {
+        return ['success' => false, 'message' => 'Deck generation in progress'];
+    }
+    
+    touch($lockFile);
+
     try {
         $pdo = Config::getDatabaseConnection();
         $timezone = new DateTimeZone('America/Indiana/Indianapolis');
@@ -92,9 +103,11 @@ function generateDailyDeck($gameId, $playerId) {
         }
         
         $pdo->commit();
+        unlink($lockFile);
         return ['success' => true, 'deck_id' => $deckId, 'cards_generated' => $totalCards];
         
     } catch (Exception $e) {
+        unlink($lockFile);
         $pdo->rollBack();
         error_log("Error generating daily deck: " . $e->getMessage());
         return ['success' => false, 'message' => 'Failed to generate daily deck'];
