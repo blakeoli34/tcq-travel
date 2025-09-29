@@ -601,21 +601,29 @@ function clearCursesByCompletion($gameId, $playerId, $completionType) {
         
         // Get curse effects that are cleared by this completion type
         $stmt = $pdo->prepare("
-            SELECT ace.id
+            SELECT ace.id, ace.slot_number
             FROM active_curse_effects ace
             JOIN cards c ON ace.card_id = c.id
             WHERE ace.game_id = ? AND ace.player_id = ? AND c.$completionField = 1
         ");
         $stmt->execute([$gameId, $playerId]);
-        $effectIds = $stmt->fetchAll(PDO::FETCH_COLUMN);
+        $effects = $stmt->fetchAll();
         
-        if (!empty($effectIds)) {
+        if (!empty($effects)) {
+            $effectIds = array_column($effects, 'id');
             $placeholders = str_repeat('?,', count($effectIds) - 1) . '?';
             $stmt = $pdo->prepare("DELETE FROM active_curse_effects WHERE id IN ($placeholders)");
             $stmt->execute($effectIds);
+            
+            // Clear curse slots
+            foreach ($effects as $effect) {
+                if ($effect['slot_number']) {
+                    completeCurseSlot($gameId, $playerId, $effect['slot_number']);
+                }
+            }
         }
         
-        return count($effectIds);
+        return count($effects);
         
     } catch (Exception $e) {
         error_log("Error clearing curses by completion: " . $e->getMessage());
@@ -627,8 +635,20 @@ function clearPlayerCurseEffects($gameId, $playerId) {
     try {
         $pdo = Config::getDatabaseConnection();
         
+        // Get slot numbers before deleting
+        $stmt = $pdo->prepare("SELECT slot_number FROM active_curse_effects WHERE game_id = ? AND player_id = ?");
+        $stmt->execute([$gameId, $playerId]);
+        $slotNumbers = $stmt->fetchAll(PDO::FETCH_COLUMN);
+        
         $stmt = $pdo->prepare("DELETE FROM active_curse_effects WHERE game_id = ? AND player_id = ?");
         $stmt->execute([$gameId, $playerId]);
+        
+        // Clear curse slots
+        foreach ($slotNumbers as $slotNumber) {
+            if ($slotNumber) {
+                completeCurseSlot($gameId, $playerId, $slotNumber);
+            }
+        }
         
         return $stmt->rowCount();
         

@@ -159,8 +159,10 @@ function setGameDuration($gameId, $durationDays) {
         $timezone = new DateTimeZone('America/Indiana/Indianapolis');
         
         $startDate = new DateTime('now', $timezone);
+        $startDate->setTime(8, 0, 0); // Set to 8am
         $endDate = clone $startDate;
         $endDate->add(new DateInterval('P' . $durationDays . 'D'));
+        $endDate->setTime(23, 59, 59); // Set to 11:59:59pm
         
         $stmt = $pdo->prepare("
             UPDATE games 

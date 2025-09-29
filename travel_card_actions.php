@@ -252,11 +252,15 @@ function activateCurse($gameId, $playerId, $slotNumber) {
         // Create active curse effect only if not instant
         $effectId = null;
         if (!$curseResult['is_instant']) {
-            $effectId = addActiveCurseEffect($gameId, $playerId, $card['card_id'], $card);
+            $effectId = addActiveCurseEffect($gameId, $playerId, $card['card_id'], $card, $slotNumber, $timerId);
         }
-        
-        // Mark slot as completed
-        completeClearSlot($gameId, $playerId, $slotNumber);
+
+        $stmt = $pdo->prepare("
+            UPDATE daily_deck_slots 
+            SET curse_activated = TRUE
+            WHERE game_id = ? AND player_id = ? AND deck_date = ? AND slot_number = ?
+        ");
+        $stmt->execute([$gameId, $playerId, $today, $slotNumber]);
         
         $pdo->commit();
         return ['success' => true, 'effects' => $effects, 'effect_id' => $effectId];
@@ -265,6 +269,26 @@ function activateCurse($gameId, $playerId, $slotNumber) {
         $pdo->rollBack();
         error_log("Error activating curse: " . $e->getMessage());
         return ['success' => false, 'message' => $e->getMessage()];
+    }
+}
+
+function completeCurseSlot($gameId, $playerId, $slotNumber) {
+    try {
+        $pdo = Config::getDatabaseConnection();
+        $timezone = new DateTimeZone('America/Indiana/Indianapolis');
+        $today = (new DateTime('now', $timezone))->format('Y-m-d');
+        
+        $stmt = $pdo->prepare("
+            UPDATE daily_deck_slots 
+            SET card_id = NULL, drawn_at = NULL, completed_at = NOW(), 
+                completed_by_player_id = ?, curse_activated = FALSE
+            WHERE game_id = ? AND player_id = ? AND deck_date = ? AND slot_number = ?
+        ");
+        $stmt->execute([$playerId, $gameId, $playerId, $today, $slotNumber]);
+        
+        return ['success' => true];
+    } catch (Exception $e) {
+        return ['success' => false];
     }
 }
 
@@ -602,9 +626,13 @@ function processCurseCard($gameId, $playerId, $card) {
     }
     
     // Timer effects
+    $timerId = null;
     if ($card['timer']) {
-        createTimer($gameId, $playerId, $card['card_name'], $card['timer']);
-        $effects[] = "Timer started for {$card['timer']} minutes";
+        $timerResult = createTimer($gameId, $playerId, $card['card_name'], $card['timer']);
+        if ($timerResult['success']) {
+            $timerId = $timerResult['timer_id'];
+            $effects[] = "Timer started for {$card['timer']} minutes";
+        }
     }
     
     // Dice effects
@@ -624,20 +652,23 @@ function processCurseCard($gameId, $playerId, $card) {
     return ['effects' => $effects, 'is_instant' => $isInstant];
 }
 
-function addActiveCurseEffect($gameId, $playerId, $cardId, $card) {
+function addActiveCurseEffect($gameId, $playerId, $cardId, $card, $slotNumber = null, $timerId = null) {
     try {
         $pdo = Config::getDatabaseConnection();
         
         $expiresAt = null;
         if ($card['timer']) {
-            $expiresAt = date('Y-m-d H:i:s', strtotime("+{$card['timer']} minutes"));
+            $timezone = new DateTimeZone('America/Indiana/Indianapolis');
+            $expiresAt = (new DateTime('now', $timezone))
+                ->add(new DateInterval('PT' . $card['timer'] . 'M'))
+                ->format('Y-m-d H:i:s');
         }
         
         $stmt = $pdo->prepare("
-            INSERT INTO active_curse_effects (game_id, player_id, card_id, expires_at)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO active_curse_effects (game_id, player_id, card_id, expires_at, slot_number, timer_id)
+            VALUES (?, ?, ?, ?, ?, ?)
         ");
-        $stmt->execute([$gameId, $playerId, $cardId, $expiresAt]);
+        $stmt->execute([$gameId, $playerId, $cardId, $expiresAt, $slotNumber, $timerId]);
         
         return $pdo->lastInsertId();
         

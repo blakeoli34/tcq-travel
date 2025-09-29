@@ -37,6 +37,11 @@ $(document).ready(function() {
         gameData = window.gameDataFromPHP;
         console.log('Game data:', gameData);
     }
+
+    if (gameData.gameStatus === 'active') {
+        updateDailyGameClock();
+        setInterval(updateDailyGameClock, 1000);
+    }
     
     // Initialize Firebase
     initializeFirebase();
@@ -323,6 +328,11 @@ function updateDailyDeckDisplay(slots) {
             // Slot has a card
             slotElement.classList.add('has-card');
             slotContent.innerHTML = createSlotCardHTML(slot);
+
+            // Start auto-activate timer for curse cards
+            if (slot.card_category === 'curse' && !slot.curse_activated) {
+                setTimeout(() => startCurseAutoActivate(slot.slot_number), 100);
+            }
         } else {
             // Empty slot
             slotElement.classList.remove('has-card');
@@ -352,6 +362,45 @@ function updateDailyDeckCount() {
     });
 }
 
+function updateDailyGameClock() {
+    const clockElement = document.getElementById('dailyGameClock');
+    if (!clockElement || !gameData || gameData.gameStatus !== 'active') return;
+    
+    const timezone = 'America/Indiana/Indianapolis';
+    const now = new Date();
+    const indianaTime = new Date(now.toLocaleString("en-US", {timeZone: timezone}));
+    
+    // Calculate day of game
+    const startDate = new Date(gameData.startDate + 'T08:00:00');
+    const daysSinceStart = Math.floor((indianaTime - startDate) / (1000 * 60 * 60 * 24));
+    const gameDay = daysSinceStart + 1;
+    
+    // Calculate time until midnight
+    const endOfDay = new Date(indianaTime);
+    endOfDay.setHours(23, 59, 59, 999);
+    const diff = endOfDay - indianaTime;
+    
+    if (diff <= 0) {
+        clockElement.querySelector('.clock-time').textContent = '00:00';
+        return;
+    }
+    
+    const hours = Math.floor(diff / (1000 * 60 * 60));
+    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+    const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+    
+    // Format based on time remaining
+    let timeText;
+    if (hours > 0) {
+        timeText = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+    } else {
+        timeText = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    }
+    
+    clockElement.querySelector('.game-day').textContent = `Day ${gameDay}`;
+    clockElement.querySelector('.clock-time').textContent = timeText;
+}
+
 function animateCardDraw(slotElement) {
     const cardContent = slotElement.querySelector('.card-content');
     if (cardContent) {
@@ -373,6 +422,11 @@ function createSlotCardHTML(slot) {
     const icon = cardTypeIcons[slot.card_category] || 'fa-square';
     
     let badges = '';
+
+    if (slot.card_category === 'curse') {
+        // Add auto-activate indicator
+        badges += `<div class="card-badge timer" id="curse-auto-${slot.slot_number}">5s</div>`;
+    }
     if (slot.card_points) {
         badges += `<div class="card-badge points">+${slot.card_points}</div>`;
     }
@@ -439,6 +493,21 @@ function updateDeckMessage(slots) {
     } else {
         deckMessage.style.display = 'none';
     }
+}
+
+function startCurseAutoActivate(slotNumber) {
+    let countdown = 5;
+    const badge = document.getElementById(`curse-auto-${slotNumber}`);
+    
+    const interval = setInterval(() => {
+        countdown--;
+        if (badge) badge.textContent = countdown + 's';
+        
+        if (countdown <= 0) {
+            clearInterval(interval);
+            activateCurse(slotNumber);
+        }
+    }, 1000);
 }
 
 // ========================================
@@ -1379,12 +1448,12 @@ function updateStatusEffects() {
     });
 }
 
-function showActiveEffectsPopover() {
-    console.log('showActiveEffectsPopover called'); // Debug log
+function showActiveEffectsPopover(isOpponent = false) {
+    console.log('showActiveEffectsPopover called, isOpponent:', isOpponent);
     fetch('game.php', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: 'action=get_active_effects_details'
+        body: 'action=get_active_effects_details' + (isOpponent ? '&target=opponent' : '')
     })
     .then(response => response.json())
     .then(data => {
@@ -1440,6 +1509,9 @@ function displayStatusEffects(containerId, effects) {
     
     container.innerHTML = '';
     
+    // Determine if this is opponent's container
+    const isOpponent = containerId === 'opponentStatusEffects';
+    
     effects.forEach(effect => {
         const span = document.createElement('span');
         span.className = 'status-effect';
@@ -1447,8 +1519,8 @@ function displayStatusEffects(containerId, effects) {
         span.style.cursor = 'pointer';
         span.addEventListener('click', function(e) {
             e.stopPropagation();
-            console.log('Status effect clicked');
-            showActiveEffectsPopover();
+            console.log('Status effect clicked for:', isOpponent ? 'opponent' : 'player');
+            showActiveEffectsPopover(isOpponent);
         });
         
         if (effect.type === 'curse') {
@@ -2185,6 +2257,35 @@ function setupWaitingScreenPolling() {
         
         const statusInterval = setInterval(checkForStatusChange, 5000);
         window.addEventListener('beforeunload', () => clearInterval(statusInterval));
+    }
+
+    // Waiting for start date
+    if (document.querySelector('.waiting-screen.start-date-wait')) {
+        console.log('Starting countdown to game start...');
+        
+        function updateStartCountdown() {
+            // Parse PHP date and add 8am time
+            const startDate = new Date(gameData.startDate.replace(' ', 'T'));
+            const now = new Date();
+            const diff = startDate - now;
+            
+            if (diff <= 0) {
+                window.location.reload();
+                return;
+            }
+            
+            const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+            const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+            const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+            const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+            
+            document.getElementById('startCountdown').textContent = 
+                `${days}d ${hours}h ${minutes}m ${seconds}s`;
+        }
+        
+        updateStartCountdown();
+        const countdownInterval = setInterval(updateStartCountdown, 1000);
+        window.addEventListener('beforeunload', () => clearInterval(countdownInterval));
     }
 }
 

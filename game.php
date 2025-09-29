@@ -418,10 +418,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 exit;
             }
             
+            $targetPlayerId = $playerId;
+            if (isset($_POST['target']) && $_POST['target'] === 'opponent') {
+                $targetPlayerId = $opponentPlayer['id'];
+            }
+            
             try {
                 $pdo = Config::getDatabaseConnection();
                 
-                // Get active curse effects
+                // Get active curse effects for target player
                 $stmt = $pdo->prepare("
                     SELECT ace.*, c.card_name, c.card_description, c.challenge_modify, c.snap_modify, c.spicy_modify,
                         c.score_modify, c.timer
@@ -429,7 +434,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     JOIN cards c ON ace.card_id = c.id
                     WHERE ace.game_id = ? AND ace.player_id = ?
                 ");
-                $stmt->execute([$player['game_id'], $player['id']]);
+                $stmt->execute([$player['game_id'], $targetPlayerId]);
                 $curseEffects = $stmt->fetchAll();
                 
                 // Get active power effects
@@ -557,13 +562,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $startDate = $_POST['start_date'];
             $endDate = $_POST['end_date'];
             
-            $start = new DateTime($startDate);
-            $end = new DateTime($endDate);
-            $today = new DateTime();
+            // Set start date to 8am, end date to 11:59:59pm
+            $timezone = new DateTimeZone('America/Indiana/Indianapolis');
+            $start = new DateTime($startDate . ' 08:00:00', $timezone);
+            $end = new DateTime($endDate . ' 23:59:59', $timezone);
+            $today = new DateTime('now', $timezone);
             $today->setTime(0, 0, 0);
-            $start->setTime(0, 0, 0);
             
-            if ($start < $today) {
+            $startCheck = clone $start;
+            $startCheck->setTime(0, 0, 0);
+            
+            if ($startCheck < $today) {
                 echo json_encode(['success' => false, 'message' => 'Start date cannot be in the past']);
                 exit;
             }
@@ -582,7 +591,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     SET start_date = ?, end_date = ?, status = 'active', duration_days = ?
                     WHERE id = ?
                 ");
-                $stmt->execute([$startDate, $endDate, $daysDiff + 1, $player['game_id']]);
+                $stmt->execute([
+                    $start->format('Y-m-d H:i:s'), 
+                    $end->format('Y-m-d H:i:s'), 
+                    $daysDiff + 1, 
+                    $player['game_id']
+                ]);
                 
                 // Initialize Travel Edition
                 $initResult = initializeTravelEdition($player['game_id']);
@@ -909,6 +923,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 
                 <button class="btn" onclick="setGameDates()" id="setDatesBtn">Start Adventure</button>
             </div>
+
+        <?php elseif ($gameStatus === 'waiting' && $gameData['start_date'] && new DateTime($gameData['start_date']) > new DateTime('now', new DateTimeZone('America/Indiana/Indianapolis'))): ?>
+            <!-- Waiting for start date -->
+            <div class="waiting-screen start-date-wait">
+                <h2>Adventure Starts Soon!</h2>
+                <p>Your game will begin at 8:00 AM on</p>
+                <p><strong><?= (new DateTime($gameData['start_date']))->format('F j, Y') ?></strong></p>
+                <div id="startCountdown" style="font-size: 48px; font-weight: 900; margin: 30px 0;"></div>
+            </div>
             
         <?php elseif ($gameStatus === 'completed'): ?>
             <!-- Game ended -->
@@ -1163,7 +1186,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                         </div>
                         
                         <div class="score-divider">
-                            <i class="fa-solid fa-chevron-up" id="expandIcon"></i>
+                            <div class="daily-game-clock" id="dailyGameClock">
+                                <div class="clock-time">16:00:00</div>
+                                <i class="fa-solid fa-chevron-up" id="expandIcon"></i>
+                                <div class="game-day">Day 1</div>
+                            </div>
                         </div>
                         
                         <div class="player-score-section current">
@@ -1194,6 +1221,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     currentPlayerId: <?= $currentPlayer['id'] ?>,
                     opponentPlayerId: <?= $opponentPlayer['id'] ?>,
                     gameStatus: '<?= $gameStatus ?>',
+                    startDate: '<?= $gameData['start_date'] ?>',
                     currentPlayerGender: '<?= $currentPlayer['gender'] ?>',
                     opponentPlayerGender: '<?= $opponentPlayer['gender'] ?>',
                     opponentPlayerName: '<?= htmlspecialchars($opponentPlayer['first_name']) ?>'

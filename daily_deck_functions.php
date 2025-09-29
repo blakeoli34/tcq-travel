@@ -36,7 +36,35 @@ function generateDailyDeck($gameId, $playerId) {
         $challengeCards = selectRandomCardsForPlayer($gameId, $playerId, 'challenge', $cardsPerDay['challenge'], $usedCardIds);
         $curseCards = selectRandomCardsForPlayer($gameId, $playerId, 'curse', $cardsPerDay['curse'], $usedCardIds);
         $powerCards = selectRandomCardsForPlayer($gameId, $playerId, 'power', $cardsPerDay['power'], $usedCardIds);
-        $battleCards = selectRandomCardsForPlayer($gameId, $playerId, 'battle', 1, $usedCardIds);
+
+        // Select ONE battle card for the entire game today
+        $stmt = $pdo->prepare("
+            SELECT id FROM daily_battle_card 
+            WHERE game_id = ? AND battle_date = ?
+        ");
+        $stmt->execute([$gameId, $today]);
+        $battleCardId = $stmt->fetchColumn();
+
+        if (!$battleCardId) {
+            // No battle card selected yet, choose one for today
+            $battleCards = selectRandomCardsForPlayer($gameId, $playerId, 'battle', 1, $usedCardIds);
+            if (!empty($battleCards)) {
+                $battleCardId = $battleCards[0]['id'];
+                
+                // Store this as the battle card for today for this game
+                $stmt = $pdo->prepare("
+                    INSERT INTO daily_battle_card (game_id, battle_date, card_id)
+                    VALUES (?, ?, ?)
+                ");
+                $stmt->execute([$gameId, $today, $battleCardId]);
+            }
+            $battleCards = selectRandomCardsForPlayer($gameId, $playerId, 'battle', 1, $usedCardIds);
+        } else {
+            // Use the existing battle card
+            $stmt = $pdo->prepare("SELECT * FROM cards WHERE id = ?");
+            $stmt->execute([$battleCardId]);
+            $battleCards = [$stmt->fetch()];
+        }
 
         $stmt = $pdo->prepare("SELECT start_date FROM games WHERE id = ?");
         $stmt->execute([$gameId]);
@@ -262,6 +290,27 @@ function drawCardToSlot($gameId, $playerId, $slotNumber) {
             WHERE game_id = ? AND player_id = ? AND deck_date = ? AND slot_number = ?
         ");
         $stmt->execute([$card['card_id'], $gameId, $playerId, $today, $slotNumber]);
+
+        // If this is a battle card, mark it as drawn and remove from other player's deck
+        if ($card['card_category'] === 'battle') {
+            $stmt = $pdo->prepare("
+                UPDATE daily_battle_card 
+                SET drawn_by_player_id = ?
+                WHERE game_id = ? AND battle_date = ? AND card_id = ?
+            ");
+            $stmt->execute([$playerId, $gameId, $today, $card['card_id']]);
+            
+            // Remove from opponent's deck
+            $opponentId = getOpponentPlayerId($gameId, $playerId);
+            $stmt = $pdo->prepare("
+                UPDATE daily_deck_cards ddc
+                JOIN daily_decks dd ON ddc.deck_id = dd.id
+                SET ddc.is_used = 1
+                WHERE dd.game_id = ? AND dd.player_id = ? AND dd.deck_date = ? 
+                AND ddc.card_id = ? AND ddc.is_used = 0
+            ");
+            $stmt->execute([$gameId, $opponentId, $today, $card['card_id']]);
+        }
         
         // Mark card as used for THIS PLAYER
         $stmt = $pdo->prepare("
