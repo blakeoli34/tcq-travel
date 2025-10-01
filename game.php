@@ -418,7 +418,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 exit;
             }
             
-            $targetPlayerId = $playerId;
+            // Default to current player
+            $targetPlayerId = $player['id'];
             if (isset($_POST['target']) && $_POST['target'] === 'opponent') {
                 $targetPlayerId = $opponentPlayer['id'];
             }
@@ -437,7 +438,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $stmt->execute([$player['game_id'], $targetPlayerId]);
                 $curseEffects = $stmt->fetchAll();
                 
-                // Get active power effects
+                // Get active power effects for target player
                 $stmt = $pdo->prepare("
                     SELECT ape.*, c.card_name, c.card_description, c.power_challenge_modify, c.power_snap_modify, 
                         c.power_spicy_modify, c.power_score_modify, c.power_wait
@@ -445,7 +446,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     JOIN cards c ON ape.power_card_id = c.id
                     WHERE ape.game_id = ? AND ape.player_id = ?
                 ");
-                $stmt->execute([$player['game_id'], $player['id']]);
+                $stmt->execute([$player['game_id'], $targetPlayerId]);
                 $powerEffects = $stmt->fetchAll();
                 
                 echo json_encode([
@@ -466,17 +467,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             }
             
             $playerStats = getPlayerStats($player['game_id'], $player['id']);
+            $opponentStats = getPlayerStats($player['game_id'], $opponentPlayer['id']);
             $gameStats = getGameStats($player['game_id']);
             
-            $nextSnapLevel = getNextSnapAwardLevel($playerStats['snap_cards_completed']);
-            $nextSpicyLevel = getNextSpicyAwardLevel($playerStats['spicy_cards_completed']);
+            $playerSnapNext = getNextSnapAwardLevel($playerStats['snap_cards_completed']);
+            $playerSpicyNext = getNextSpicyAwardLevel($playerStats['spicy_cards_completed']);
+            $opponentSnapNext = getNextSnapAwardLevel($opponentStats['snap_cards_completed']);
+            $opponentSpicyNext = getNextSpicyAwardLevel($opponentStats['spicy_cards_completed']);
             
             echo json_encode([
                 'success' => true,
                 'player_stats' => $playerStats,
+                'opponent_stats' => $opponentStats,
                 'game_stats' => $gameStats,
-                'next_snap_level' => $nextSnapLevel,
-                'next_spicy_level' => $nextSpicyLevel
+                'player_snap_next' => $playerSnapNext,
+                'player_spicy_next' => $playerSpicyNext,
+                'opponent_snap_next' => $opponentSnapNext,
+                'opponent_spicy_next' => $opponentSpicyNext
             ]);
             exit;
 
@@ -486,21 +493,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 exit;
             }
             
-            // Convert current time to Indiana timezone for comparison
             $timezone = new DateTimeZone('America/Indiana/Indianapolis');
             $now = new DateTime('now', $timezone);
             
             $stmt = $pdo->prepare("
                 SELECT veto_wait_until FROM players 
-                WHERE game_id = ? AND id = ? AND veto_wait_until > ?
+                WHERE game_id = ? AND id = ?
             ");
-            $stmt->execute([$player['game_id'], $player['id'], $now->format('Y-m-d H:i:s')]);
+            $stmt->execute([$player['game_id'], $player['id']]);
             $waitUntil = $stmt->fetchColumn();
+            
+            $isWaiting = false;
+            if ($waitUntil) {
+                $waitTime = new DateTime($waitUntil, $timezone);
+                $isWaiting = $now < $waitTime;
+                
+                // Convert to ISO format that JavaScript can parse correctly
+                if ($isWaiting) {
+                    $waitUntil = $waitTime->format('c'); // ISO 8601 format with timezone
+                }
+            }
             
             echo json_encode([
                 'success' => true, 
-                'is_waiting' => (bool)$waitUntil,
-                'wait_until' => $waitUntil
+                'is_waiting' => $isWaiting,
+                'wait_until' => $isWaiting ? $waitUntil : null
             ]);
             exit;
 
@@ -1059,9 +1076,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             
             <!-- Daily Deck Slots (center of screen) -->
             <div class="daily-deck-container" id="dailyDeckContainer">
-                <div class="deck-message" id="deckMessage">
-                    Draw your first 3 cards from today's Daily Deck
+                <div class="deck-message-overlay" id="deckMessageOverlay" onclick="drawAllSlots()" style="display: none;">
+                    <div class="deck-message-content">
+                        <div class="deck-message-icon"><i class="fa-solid fa-cards-blank"></i></div>
+                        <div class="deck-message-text">Tap to Draw 3 Cards</div>
+                    </div>
                 </div>
+
+                <div class="daily-deck-count" id="dailyDeckCount" style="display: none;"></div>
                 
                 <div class="veto-wait-overlay" id="vetoWaitOverlay" style="display: none;">
                     <div class="veto-message">Wait to Play</div>
@@ -1102,39 +1124,54 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                         <div class="awards-section">
                             <h3>Awards Progress</h3>
                             
+                            <!-- Snap Award -->
                             <div class="award-row">
-                                <div class="award-item">
+                                <div class="award-column opponent">
                                     <div class="award-icon snap-award">
                                         <i class="fa-solid fa-camera-retro"></i>
                                     </div>
-                                    <div class="award-info">
-                                        <div class="award-level">LEVEL 1</div>
-                                        <div class="award-name">SNAPPY</div>
-                                        <div class="award-progress">1/5 TO NEXT LEVEL</div>
-                                    </div>
+                                    <div class="award-count" id="opponentSnapProgress">-</div>
                                 </div>
-                                
-                                <div class="award-item">
-                                    <div class="award-icon spicy-award">
-                                        <i class="fa-solid fa-pepper-hot"></i>
+                                <div class="award-label">SNAP</div>
+                                <div class="award-column current">
+                                    <div class="award-icon snap-award">
+                                        <i class="fa-solid fa-camera-retro"></i>
                                     </div>
-                                    <div class="award-info">
-                                        <div class="award-level">LEVEL 1</div>
-                                        <div class="award-name">ROMANCE</div>
-                                        <div class="award-progress">0/3 TO NEXT LEVEL</div>
-                                    </div>
+                                    <div class="award-count" id="playerSnapProgress">-</div>
                                 </div>
                             </div>
                             
-                            <div class="challenge-master">
-                                <div class="challenge-master-icon">
-                                    <i class="fa-solid fa-trophy"></i>
-                                </div>
-                                <div class="challenge-master-info">
-                                    <div class="challenge-master-count">
-                                        <span id="playerChallengeCount">12</span> CHALLENGE MASTER <span id="opponentChallengeCount">11</span>
+                            <!-- Spicy Award -->
+                            <div class="award-row">
+                                <div class="award-column opponent">
+                                    <div class="award-icon spicy-award">
+                                        <i class="fa-solid fa-pepper-hot"></i>
                                     </div>
-                                    <div class="challenge-master-desc">+25 to player with most challenges completed by end of game</div>
+                                    <div class="award-count" id="opponentSpicyProgress">-</div>
+                                </div>
+                                <div class="award-label">SPICY</div>
+                                <div class="award-column current">
+                                    <div class="award-icon spicy-award">
+                                        <i class="fa-solid fa-pepper-hot"></i>
+                                    </div>
+                                    <div class="award-count" id="playerSpicyProgress">-</div>
+                                </div>
+                            </div>
+                            
+                            <!-- Challenge Master -->
+                            <div class="award-row">
+                                <div class="award-column opponent">
+                                    <div class="award-icon challenge-master">
+                                        <i class="fa-solid fa-trophy"></i>
+                                    </div>
+                                    <div class="award-count" id="opponentChallengeCount">-</div>
+                                </div>
+                                <div class="award-label">MASTER</div>
+                                <div class="award-column current">
+                                    <div class="award-icon challenge-master">
+                                        <i class="fa-solid fa-trophy"></i>
+                                    </div>
+                                    <div class="award-count" id="playerChallengeCount">-</div>
                                 </div>
                             </div>
                         </div>

@@ -425,11 +425,6 @@ function createSlotCardHTML(slot) {
     const icon = cardTypeIcons[slot.card_category] || 'fa-square';
     
     let badges = '';
-
-    if (slot.card_category === 'curse') {
-        // Add auto-activate indicator
-        badges += `<div class="card-badge timer" id="curse-auto-${slot.slot_number}">5s</div>`;
-    }
     if (slot.card_points) {
         badges += `<div class="card-badge points">+${slot.card_points}</div>`;
     }
@@ -452,8 +447,15 @@ function createSlotCardHTML(slot) {
         badges += `<div class="card-badge penalty"><i class="fa-solid fa-pepper-hot"></i> ${slot.veto_spicy}</div>`;
     }
     
+    // Add auto-activate message for curse cards
+    if (slot.card_category === 'curse' && !slot.curse_activated) {
+        badges = `<div class="curse-auto-activate" id="curse-auto-${slot.slot_number}">Activating in 5...</div>` + badges;
+    }
+    
     const actions = getSlotActions(slot.card_category);
-    const actionsHTML = `
+    
+    // For curse cards, don't show actions if already activated
+    const actionsHTML = (slot.card_category === 'curse' && slot.curse_activated) ? '' : `
         <div class="slot-actions">
             ${actions.map(action => `
                 <button class="slot-action-btn ${action.class || ''}" onclick="${action.onClick}(${slot.slot_number || 1})">
@@ -483,31 +485,30 @@ function createSlotCardHTML(slot) {
 }
 
 function updateDeckMessage(slots) {
-    const deckMessage = document.getElementById('deckMessage');
-    if (!deckMessage) return;
+    const overlay = document.getElementById('deckMessageOverlay');
+    if (!overlay) return;
     
     const emptySlots = slots.filter(slot => !slot.card_id).length;
-    
-    if (emptySlots === 3) {
-        deckMessage.textContent = "Draw your first 3 cards from today's Daily Deck";
-        deckMessage.style.display = 'block';
-    } else if (emptySlots > 0) {
-        deckMessage.style.display = 'none';
-    } else {
-        deckMessage.style.display = 'none';
-    }
+    overlay.style.display = emptySlots === 3 ? 'flex' : 'none';
+}
+
+function drawAllSlots() {
+    drawToSlot(1);
+    setTimeout(() => drawToSlot(2), 300);
+    setTimeout(() => drawToSlot(3), 600);
 }
 
 function startCurseAutoActivate(slotNumber) {
     let countdown = 5;
-    const badge = document.getElementById(`curse-auto-${slotNumber}`);
+    const message = document.getElementById(`curse-auto-${slotNumber}`);
     
     const interval = setInterval(() => {
         countdown--;
-        if (badge) badge.textContent = countdown + 's';
+        if (message) message.textContent = `Activating in ${countdown}...`;
         
         if (countdown <= 0) {
             clearInterval(interval);
+            if (message) message.remove();
             activateCurse(slotNumber);
         }
     }, 1000);
@@ -804,6 +805,9 @@ function activateCurse(slotNumber) {
         if (data.success) {
             playSoundIfEnabled('/card-curse.m4r');
             showInAppNotification('Curse Activated!', 'Check your status effects');
+            // Add activated class to slot
+            const slot = document.querySelector(`.daily-slot[data-slot="${slotNumber}"]`);
+            if (slot) slot.classList.add('curse-activated');
             loadDailyDeck();
             setTimeout(() => updateStatusEffects(), 1000);
         } else {
@@ -1381,8 +1385,7 @@ function checkVetoWait() {
 function startVetoWaitDisplay(waitUntil) {
     isVetoWaiting = true;
     
-    // Parse the MySQL datetime string directly (it's already in local Indiana time)
-    vetoWaitEndTime = new Date(waitUntil.replace(' ', 'T'));
+    vetoWaitEndTime = new Date(waitUntil);
 
     $('.daily-deck-container').addClass('wait');
     
@@ -1639,31 +1642,44 @@ function loadAwardsInfo() {
 }
 
 function updateAwardsDisplay(data) {
-    // Update snap award progress
-    const snapProgress = document.querySelector('.award-item:first-child .award-progress');
-    if (snapProgress && data.next_snap_level) {
-        snapProgress.textContent = `${data.next_snap_level.cards_needed}/${data.next_snap_level.next_level} TO NEXT LEVEL`;
+    // Player snap
+    const playerSnapEl = document.getElementById('playerSnapProgress');
+    if (playerSnapEl) {
+        playerSnapEl.textContent = data.player_snap_next ? 
+            `${data.player_snap_next.cards_needed} to go` : 'MAX';
     }
     
-    // Update spicy award progress
-    const spicyProgress = document.querySelector('.award-item:last-child .award-progress');
-    if (spicyProgress && data.next_spicy_level) {
-        spicyProgress.textContent = `${data.next_spicy_level.cards_needed}/${data.next_spicy_level.next_level} TO NEXT LEVEL`;
+    // Opponent snap
+    const opponentSnapEl = document.getElementById('opponentSnapProgress');
+    if (opponentSnapEl) {
+        opponentSnapEl.textContent = data.opponent_snap_next ? 
+            `${data.opponent_snap_next.cards_needed} to go` : 'MAX';
     }
     
-    // Update challenge master
-    const playerChallengeCount = document.getElementById('playerChallengeCount');
-    const opponentChallengeCount = document.getElementById('opponentChallengeCount');
-    
-    if (playerChallengeCount && data.player_stats) {
-        playerChallengeCount.textContent = data.player_stats.challenges_completed;
+    // Player spicy
+    const playerSpicyEl = document.getElementById('playerSpicyProgress');
+    if (playerSpicyEl) {
+        playerSpicyEl.textContent = data.player_spicy_next ? 
+            `${data.player_spicy_next.cards_needed} to go` : 'MAX';
     }
     
-    if (opponentChallengeCount && data.game_stats && data.game_stats.player_stats.length > 1) {
-        const opponentStats = data.game_stats.player_stats.find(p => p.player_id !== gameData.currentPlayerId);
-        if (opponentStats) {
-            opponentChallengeCount.textContent = opponentStats.challenges_completed;
-        }
+    // Opponent spicy
+    const opponentSpicyEl = document.getElementById('opponentSpicyProgress');
+    if (opponentSpicyEl) {
+        opponentSpicyEl.textContent = data.opponent_spicy_next ? 
+            `${data.opponent_spicy_next.cards_needed} to go` : 'MAX';
+    }
+    
+    // Player challenge count
+    const playerChallengeEl = document.getElementById('playerChallengeCount');
+    if (playerChallengeEl && data.player_stats) {
+        playerChallengeEl.textContent = data.player_stats.challenges_completed;
+    }
+    
+    // Opponent challenge count
+    const opponentChallengeEl = document.getElementById('opponentChallengeCount');
+    if (opponentChallengeEl && data.opponent_stats) {
+        opponentChallengeEl.textContent = data.opponent_stats.challenges_completed;
     }
 }
 
@@ -2665,6 +2681,7 @@ window.drawSpicyCard = drawSpicyCard;
 window.toggleScoreBugExpanded = toggleScoreBugExpanded;
 window.adjustScore = adjustScore;
 window.stealPoints = stealPoints;
+window.drawAllSlots = drawAllSlots;
 
 // Modal functions
 window.openNotifyModal = openNotifyModal;

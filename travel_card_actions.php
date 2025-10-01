@@ -147,7 +147,7 @@ function completeBattle($gameId, $playerId, $slotNumber, $isWinner) {
             SELECT dds.*, c.*
             FROM daily_deck_slots dds
             JOIN cards c ON dds.card_id = c.id
-            WHERE dds.game_id = ? AND dds.player_id AND dds.deck_date = ? AND dds.slot_number = ? AND c.card_category = 'battle'
+            WHERE dds.game_id = ? AND dds.player_id = ? AND dds.deck_date = ? AND dds.slot_number = ? AND c.card_category = 'battle'
         ");
         $stmt->execute([$gameId, $playerId, $today, $slotNumber]);
         $card = $stmt->fetch();
@@ -611,6 +611,12 @@ function processCurseCard($gameId, $playerId, $card) {
         updateScore($gameId, $playerId, -$card['score_steal'], $playerId);
         updateScore($gameId, $opponentId, $card['score_steal'], $playerId);
         $effects[] = "Lost {$card['score_steal']} points to opponent";
+    }
+
+    // Wait effects
+    if ($card['wait']) {
+        applyVetoWait($gameId, $playerId, $card['wait']);
+        $effects[] = "Cannot interact with deck for {$card['wait']} minutes";
     }
     
     // Check for ongoing effects
