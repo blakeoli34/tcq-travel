@@ -24,7 +24,7 @@ $(document).ready(function() {
     // Initialize sound on first user interaction
     let hasClicked = false;
     $(document).on('click', function(event) {
-        if (!hasClicked) {
+        if (!hasClicked && isSoundEnabled()) {
             hasClicked = true;
             actionSound.play().catch(() => {});
             console.log('Sounds enabled');
@@ -42,6 +42,10 @@ $(document).ready(function() {
         updateDailyGameClock();
         setInterval(updateDailyGameClock, 1000);
     }
+
+    setTimeout(() => {
+        updateSoundIcon();
+    }, 100);
     
     // Initialize Firebase
     initializeFirebase();
@@ -51,6 +55,9 @@ $(document).ready(function() {
     setupModeButtons();
     setupModalHandlers();
     setupScoreBugHandlers();
+
+    // CHECK DOWNTIME IMMEDIATELY
+    const isDowntime = checkDowntime();
     
     setTimeout(() => {
         if (!checkDowntime()) {
@@ -63,6 +70,8 @@ $(document).ready(function() {
             updateDeckCounts();
             updateDailyDeckCount();
         }
+        setScorebugWidth();
+        $('.score-bug, .game-timer, .hand-indicator').addClass('visible');
     }, 500);
     
     // Periodic updates
@@ -166,12 +175,12 @@ function loadDailyDeck() {
 }
 
 function checkDowntime() {
-    const timezone = 'America/Indiana/Indianapolis';
-    const now = new Date();
-    const indianaTime = new Date(now.toLocaleString("en-US", {timeZone: timezone}));
-    const hours = indianaTime.getHours();
+    // Get current time in Indianapolis timezone
+    const indianaTime = new Date().toLocaleString("en-US", {timeZone: "America/Indiana/Indianapolis"});
+    const now = new Date(indianaTime);
+    const hours = now.getHours();
     
-    // Downtime is midnight (0) to 8am
+    // Downtime is midnight (0) to 8am Indianapolis time
     if (hours >= 0 && hours < 8) {
         const nextAvailable = new Date(indianaTime);
         nextAvailable.setHours(8, 0, 0, 0);
@@ -218,7 +227,9 @@ function updateDowntimeCountdown(nextAvailable) {
     const countdown = document.getElementById('downtimeCountdown');
     if (!countdown) return false;
     
-    const now = new Date();
+    // Get current time in Indianapolis timezone
+    const indianaTime = new Date().toLocaleString("en-US", {timeZone: "America/Indiana/Indianapolis"});
+    const now = new Date(indianaTime);
     const diff = nextAvailable - now;
     
     if (diff <= 0) {
@@ -228,6 +239,8 @@ function updateDowntimeCountdown(nextAvailable) {
     const hours = Math.floor(diff / (1000 * 60 * 60));
     const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
     const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+
+    $('.daily-deck-container').addClass('loaded');
     
     countdown.textContent = `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
     return true;
@@ -327,20 +340,27 @@ function updateDailyDeckDisplay(slots) {
     
     slots.forEach((slot, index) => {
         const slotElement = dailySlots[index];
-        if (!slotElement) return; // Guard against missing elements
+        if (!slotElement) return;
         
         const slotContent = slotElement.querySelector('.slot-content');
-        if (!slotContent) return; // Guard against missing content
+        if (!slotContent) return;
         
         if (slot.card_id) {
             slotElement.classList.add('has-card');
             slotContent.innerHTML = createSlotCardHTML(slot);
 
+            // Add curse-activated class if curse has been activated
+            if (slot.card_category === 'curse' && slot.curse_activated) {
+                slotElement.classList.add('curse-activated');
+            } else {
+                slotElement.classList.remove('curse-activated');
+            }
+
             if (slot.card_category === 'curse' && !slot.curse_activated) {
                 setTimeout(() => startCurseAutoActivate(slot.slot_number), 100);
             }
         } else {
-            slotElement.classList.remove('has-card');
+            slotElement.classList.remove('has-card', 'curse-activated');
             slotContent.innerHTML = '<div class="empty-slot">TAP TO DRAW A CARD</div>';
         }
     });
@@ -409,6 +429,34 @@ function updateDailyGameClock() {
 
 function animateCardDraw(slotElement) {
     const cardContent = slotElement.querySelector('.card-content');
+    if (cardContent) {
+        cardContent.classList.add('card-draw-animation');
+        setTimeout(() => {
+            cardContent.classList.remove('card-draw-animation');
+        }, 600);
+    }
+}
+
+function animateCardComplete(slotElement) {
+    const cardContent = slotElement.querySelector('.card-content, .hand-slot-card');
+    if (cardContent) {
+        cardContent.style.transition = 'all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1)';
+        cardContent.style.transform = 'scale(0)';
+        cardContent.style.opacity = '0';
+    }
+}
+
+function animateCardVeto(slotElement) {
+    const cardContent = slotElement.querySelector('.card-content, .hand-slot-card');
+    if (cardContent) {
+        cardContent.style.transition = 'all 0.6s cubic-bezier(0.6, 0.04, 0.98, 0.34)';
+        cardContent.style.transform = 'translateY(200vh) rotate(25deg)';
+        cardContent.style.opacity = '0';
+    }
+}
+
+function animateHandCardIn(slotElement) {
+    const cardContent = slotElement.querySelector('.hand-slot-card');
     if (cardContent) {
         cardContent.classList.add('card-draw-animation');
         setTimeout(() => {
@@ -532,7 +580,18 @@ function handleSlotInteraction(slotNumber) {
     if (!slot || !slot.card_id) {
         drawToSlot(slotNumber);
     } else {
-        toggleSlotActions(slotNumber);
+        // Check if card has any actions
+        const actions = getSlotActions(slot.card_category);
+        
+        // For curse cards that are already activated, no actions
+        if (slot.card_category === 'curse' && slot.curse_activated) {
+            return; // Do nothing
+        }
+        
+        // If there are actions, toggle expansion
+        if (actions.length > 0) {
+            toggleSlotActions(slotNumber);
+        }
     }
 }
 
@@ -755,46 +814,53 @@ function addBadgeToCard(cardElement, modifier) {
 }
 
 function completeChallenge(slotNumber) {
-    fetch('game.php', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: `action=complete_challenge&slot_number=${slotNumber}`
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            playSoundIfEnabled('/card-completed.m4r');
-            if (data.points_awarded) {
-                showInAppNotification('Challenge Complete!', `Earned ${data.points_awarded} points`);
-                // Call refreshGameData directly instead of updateScore
-                setTimeout(() => refreshGameData(), 1000);
+    const slotEl = document.querySelector(`.daily-slot[data-slot="${slotNumber}"]`);
+    
+    playSoundIfEnabled('/card-completed.m4r');
+    animateCardComplete(slotEl);
+    
+    setTimeout(() => {
+        fetch('game.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: `action=complete_challenge&slot_number=${slotNumber}`
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                if (data.points_awarded) {
+                    setTimeout(() => refreshGameData(), 500);
+                }
+                loadDailyDeck();
+            } else {
+                alert('Failed to complete challenge: ' + data.message);
             }
-            loadDailyDeck();
-        } else {
-            alert('Failed to complete challenge: ' + data.message);
-        }
-    });
+        });
+    }, 500);
 }
 
 function vetoChallenge(slotNumber) {
-    fetch('game.php', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: `action=veto_challenge&slot_number=${slotNumber}`
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            playSoundIfEnabled('/card-vetoed.m4r');
-            if (data.penalties && data.penalties.length > 0) {
-                showInAppNotification('Challenge Vetoed', data.penalties.join(', '));
+    const slotEl = document.querySelector(`.daily-slot[data-slot="${slotNumber}"]`);
+    
+    playSoundIfEnabled('/card-vetoed.m4r');
+    animateCardVeto(slotEl);
+    
+    setTimeout(() => {
+        fetch('game.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: `action=veto_challenge&slot_number=${slotNumber}`
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                loadDailyDeck();
+                setTimeout(() => refreshGameData(), 1000);
+            } else {
+                alert('Failed to veto challenge: ' + data.message);
             }
-            loadDailyDeck();
-            setTimeout(() => refreshGameData(), 1500);
-        } else {
-            alert('Failed to veto challenge: ' + data.message);
-        }
-    });
+        });
+    }, 600);
 }
 
 function activateCurse(slotNumber) {
@@ -864,24 +930,27 @@ function loseBattle(slotNumber) {
 }
 
 function completeBattle(slotNumber, isWinner) {
-    fetch('game.php', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: `action=complete_battle&slot_number=${slotNumber}&is_winner=${isWinner}`
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            playSoundIfEnabled('/card-battle.m4r');
-            if (data.results && data.results.length > 0) {
-                showInAppNotification('Battle Complete!', data.results.join(', '));
+    const slotEl = document.querySelector(`.daily-slot[data-slot="${slotNumber}"]`);
+    
+    playSoundIfEnabled('/card-completed.m4r');
+    animateCardComplete(slotEl);
+    
+    setTimeout(() => {
+        fetch('game.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: `action=complete_battle&slot_number=${slotNumber}&is_winner=${isWinner}`
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                loadDailyDeck();
+                setTimeout(() => refreshGameData(), 1000);
+            } else {
+                alert('Failed to complete battle: ' + data.message);
             }
-            loadDailyDeck();
-            setTimeout(() => refreshGameData(), 1500);
-        } else {
-            alert('Failed to complete battle: ' + data.message);
-        }
-    });
+        });
+    }, 500);
 }
 
 // ========================================
@@ -1123,96 +1192,118 @@ function playPowerCard(playerCardId) {
 }
 
 function completeSnapCard(playerCardId) {
-    fetch('game.php', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: `action=complete_snap_card&player_card_id=${playerCardId}`
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            playSoundIfEnabled('/card-completed.m4r');
-            if (data.effects && data.effects.length > 0) {
-                showInAppNotification('Snap Complete!', data.effects.join(', '));
+    const cardSlot = document.querySelector(`[onclick*="completeSnapCard(${playerCardId})"]`)?.closest('.hand-slot');
+    
+    if (cardSlot) {
+        playSoundIfEnabled('/card-completed.m4r');
+        animateCardComplete(cardSlot);
+    }
+    
+    setTimeout(() => {
+        fetch('game.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: `action=complete_snap_card&player_card_id=${playerCardId}`
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                if (data.points_awarded) {
+                    setTimeout(() => updateScore(gameData.currentPlayerId, data.points_awarded), 500);
+                }
+                loadHandCards();
+                setTimeout(() => updateStatusEffects(), 1000);
+            } else {
+                alert('Failed to complete snap card: ' + data.message);
             }
-            if (data.points_awarded) {
-                setTimeout(() => updateScore(gameData.currentPlayerId, data.points_awarded), 1000);
-            }
-            loadHandCards();
-            setTimeout(() => updateStatusEffects(), 1500);
-        } else {
-            alert('Failed to complete snap card: ' + data.message);
-        }
-    });
+        });
+    }, 500);
 }
 
 function completeSpicyCard(playerCardId) {
-    fetch('game.php', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: `action=complete_spicy_card&player_card_id=${playerCardId}`
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            playSoundIfEnabled('/card-completed.m4r');
-            if (data.effects && data.effects.length > 0) {
-                showInAppNotification('Spicy Complete!', data.effects.join(', '));
+    const cardSlot = document.querySelector(`[onclick*="completeSpicyCard(${playerCardId})"]`)?.closest('.hand-slot');
+    
+    if (cardSlot) {
+        playSoundIfEnabled('/card-completed.m4r');
+        animateCardComplete(cardSlot);
+    }
+    
+    setTimeout(() => {
+        fetch('game.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: `action=complete_spicy_card&player_card_id=${playerCardId}`
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                if (data.points_awarded) {
+                    setTimeout(() => updateScore(gameData.currentPlayerId, data.points_awarded), 500);
+                }
+                loadHandCards();
+                setTimeout(() => updateStatusEffects(), 1000);
+            } else {
+                alert('Failed to complete spicy card: ' + data.message);
             }
-            if (data.points_awarded) {
-                setTimeout(() => updateScore(gameData.currentPlayerId, data.points_awarded), 1000);
-            }
-            loadHandCards();
-            setTimeout(() => updateStatusEffects(), 1500);
-        } else {
-            alert('Failed to complete spicy card: ' + data.message);
-        }
-    });
+        });
+    }, 500);
 }
 
 function vetoSnapCard(playerCardId) {
-    fetch('game.php', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: `action=veto_snap_card&player_card_id=${playerCardId}`
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            playSoundIfEnabled('/card-vetoed.m4r');
-            if (data.penalties && data.penalties.length > 0) {
-                showInAppNotification('Snap Vetoed', data.penalties.join(', '));
+    const cardSlot = document.querySelector(`[onclick*="vetoSnapCard(${playerCardId})"]`)?.closest('.hand-slot');
+    
+    if (cardSlot) {
+        playSoundIfEnabled('/card-vetoed.m4r');
+        animateCardVeto(cardSlot);
+    }
+    
+    setTimeout(() => {
+        fetch('game.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: `action=veto_snap_card&player_card_id=${playerCardId}`
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                loadHandCards();
+                setTimeout(() => refreshGameData(), 1000);
+            } else {
+                alert('Failed to veto snap card: ' + data.message);
             }
-            loadHandCards();
-            setTimeout(() => refreshGameData(), 1500);
-        } else {
-            alert('Failed to veto snap card: ' + data.message);
-        }
-    });
+        });
+    }, 600);
 }
 
 function vetoSpicyCard(playerCardId) {
-    fetch('game.php', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: `action=veto_spicy_card&player_card_id=${playerCardId}`
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            playSoundIfEnabled('/card-vetoed.m4r');
-            if (data.penalties && data.penalties.length > 0) {
-                showInAppNotification('Spicy Vetoed', data.penalties.join(', '));
+    const cardSlot = document.querySelector(`[onclick*="vetoSpicyCard(${playerCardId})"]`)?.closest('.hand-slot');
+    
+    if (cardSlot) {
+        playSoundIfEnabled('/card-vetoed.m4r');
+        animateCardVeto(cardSlot);
+    }
+    
+    setTimeout(() => {
+        fetch('game.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: `action=veto_spicy_card&player_card_id=${playerCardId}`
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                loadHandCards();
+                setTimeout(() => refreshGameData(), 1000);
+            } else {
+                alert('Failed to veto spicy card: ' + data.message);
             }
-            loadHandCards();
-            setTimeout(() => refreshGameData(), 1500);
-        } else {
-            alert('Failed to veto spicy card: ' + data.message);
-        }
-    });
+        });
+    }, 600);
 }
 
 function drawSnapCard() {
+    playSoundIfEnabled('/card-drawn.m4r');
+    
     fetch('game.php', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -1221,8 +1312,12 @@ function drawSnapCard() {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            showInAppNotification('Card Drawn!', data.message);
             loadHandCards();
+            setTimeout(() => {
+                const slots = document.querySelectorAll('.hand-slot.filled');
+                const lastSlot = slots[slots.length - 1];
+                if (lastSlot) animateHandCardIn(lastSlot);
+            }, 100);
         } else {
             alert('Failed to draw snap card: ' + data.message);
         }
@@ -1230,6 +1325,8 @@ function drawSnapCard() {
 }
 
 function drawSpicyCard() {
+    playSoundIfEnabled('/card-drawn.m4r');
+    
     fetch('game.php', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -1238,8 +1335,12 @@ function drawSpicyCard() {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            showInAppNotification('Card Drawn!', data.message);
             loadHandCards();
+            setTimeout(() => {
+                const slots = document.querySelectorAll('.hand-slot.filled');
+                const lastSlot = slots[slots.length - 1];
+                if (lastSlot) animateHandCardIn(lastSlot);
+            }, 100);
         } else {
             alert('Failed to draw spicy card: ' + data.message);
         }
@@ -1603,6 +1704,11 @@ function setupScoreBugHandlers() {
     });
 }
 
+function setScorebugWidth() {
+    const $scoreBug = $('.score-bug');
+    $scoreBug.width($scoreBug.width());
+}
+
 function toggleScoreBugExpanded() {
     const scoreBug = document.getElementById('scoreBug');
     const expandIcon = document.getElementById('expandIcon');
@@ -1839,10 +1945,24 @@ function updateGameTimer(timeText) {
 
 function setSoundEnabled(enabled) {
     localStorage.setItem('couples_quest_sound_enabled', enabled ? 'true' : 'false');
+    updateSoundIcon();
 }
 
 function isSoundEnabled() {
     return localStorage.getItem('couples_quest_sound_enabled') !== 'false';
+}
+
+function updateSoundIcon() {
+    const icon = document.getElementById('soundToggleIcon');
+    if (icon) {
+        icon.className = isSoundEnabled() ? 'fa-solid fa-volume-high' : 'fa-solid fa-volume-xmark';
+    }
+}
+
+function toggleSound() {
+    const enabled = !isSoundEnabled();
+    setSoundEnabled(enabled);
+    playSoundIfEnabled('/tritone.m4r'); // Play feedback sound if enabled
 }
 
 function playSoundIfEnabled(soundFile) {

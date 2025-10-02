@@ -172,6 +172,58 @@ function updateScore($gameId, $playerId, $pointsToAdd, $modifiedBy) {
     }
 }
 
+function cleanupIncorrectHandCards($gameId) {
+    try {
+        $pdo = Config::getDatabaseConnection();
+        $pdo->beginTransaction();
+        
+        // Get all players in this game with their travel mode
+        $stmt = $pdo->prepare("
+            SELECT p.id, p.gender, g.travel_mode_id 
+            FROM players p 
+            JOIN games g ON p.game_id = g.id 
+            WHERE g.id = ?
+        ");
+        $stmt->execute([$gameId]);
+        $players = $stmt->fetchAll();
+        
+        foreach ($players as $player) {
+            $genderClause = $player['gender'] === 'male' ? "AND c.male = 1" : "AND c.female = 1";
+            
+            // Get valid card IDs for this player's gender and travel mode
+            $stmt = $pdo->prepare("
+                SELECT c.id FROM cards c
+                JOIN card_travel_modes ctm ON c.id = ctm.card_id
+                WHERE c.card_category IN ('snap', 'spicy') 
+                AND ctm.mode_id = ? 
+                $genderClause
+            ");
+            $stmt->execute([$player['travel_mode_id']]);
+            $validCardIds = $stmt->fetchAll(PDO::FETCH_COLUMN);
+            
+            if (empty($validCardIds)) continue;
+            
+            // Remove cards that aren't valid for this player
+            $placeholders = str_repeat('?,', count($validCardIds) - 1) . '?';
+            $stmt = $pdo->prepare("
+                DELETE FROM player_cards 
+                WHERE game_id = ? AND player_id = ? 
+                AND card_type IN ('snap', 'spicy') 
+                AND card_id NOT IN ($placeholders)
+            ");
+            $params = array_merge([$gameId, $player['id']], $validCardIds);
+            $stmt->execute($params);
+        }
+        
+        $pdo->commit();
+        return true;
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        error_log("Error cleaning up hand cards: " . $e->getMessage());
+        return false;
+    }
+}
+
 function setGameDuration($gameId, $durationDays) {
     try {
         $pdo = Config::getDatabaseConnection();

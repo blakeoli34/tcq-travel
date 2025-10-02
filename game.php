@@ -943,6 +943,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 echo json_encode(['success' => false]);
             }
             exit;
+
+        case 'cleanup_hands':
+            // Temporary cleanup - remove after running once
+            $result = cleanupIncorrectHandCards($player['game_id']);
+            echo json_encode(['success' => $result]);
+            exit;
     }
 }
 ?>
@@ -1126,7 +1132,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             ?>
             
             <!-- Game Timer -->
-            <div class="game-timer visible">
+            <div class="game-timer">
                 <?= $gameTimeText ?>
             </div>
 
@@ -1235,6 +1241,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 <div class="score-bug-content">
                     <!-- Expanded Content (hidden above) -->
                     <div class="score-bug-expanded-content" id="scoreBugExpandedContent">
+                        <div class="sound-toggle-section">
+                            <i class="fa-solid fa-volume-high" id="soundToggleIcon" onclick="event.stopPropagation(); toggleSound()"></i>
+                        </div>
                         <!-- Dice Roller -->
                         <div class="dice-roller-section">
                             <i class="fa-solid fa-dice" onclick="event.stopPropagation(); openDicePopover()"></i>

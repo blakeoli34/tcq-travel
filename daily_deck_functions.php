@@ -456,12 +456,18 @@ function clearExpiredDailyDecks($gameId) {
         ");
         $stmt->execute([$gameId, $today]);
         
-        // Mark all previous day deck cards as unused
+        // DELETE old deck card records (not just mark unused)
         $stmt = $pdo->prepare("
-            UPDATE daily_deck_cards ddc
+            DELETE ddc FROM daily_deck_cards ddc
             JOIN daily_decks dd ON ddc.deck_id = dd.id
-            SET ddc.is_used = 0
             WHERE dd.game_id = ? AND dd.deck_date < ?
+        ");
+        $stmt->execute([$gameId, $today]);
+        
+        // DELETE old deck records
+        $stmt = $pdo->prepare("
+            DELETE FROM daily_decks 
+            WHERE game_id = ? AND deck_date < ?
         ");
         $stmt->execute([$gameId, $today]);
         
