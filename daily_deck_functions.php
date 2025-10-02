@@ -456,20 +456,8 @@ function clearExpiredDailyDecks($gameId) {
         ");
         $stmt->execute([$gameId, $today]);
         
-        // DELETE old deck card records (not just mark unused)
-        $stmt = $pdo->prepare("
-            DELETE ddc FROM daily_deck_cards ddc
-            JOIN daily_decks dd ON ddc.deck_id = dd.id
-            WHERE dd.game_id = ? AND dd.deck_date < ?
-        ");
-        $stmt->execute([$gameId, $today]);
-        
-        // DELETE old deck records
-        $stmt = $pdo->prepare("
-            DELETE FROM daily_decks 
-            WHERE game_id = ? AND deck_date < ?
-        ");
-        $stmt->execute([$gameId, $today]);
+        // Keep deck records for tracking used cards, but they won't affect daily deck size
+        // The used cards are tracked permanently to prevent reuse
         
         return true;
         

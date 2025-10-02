@@ -933,5 +933,7 @@ function cleanupExpiredEffects($gameId) {
     } catch (Exception $e) {
         error_log("Error cleaning up veto waits: " . $e->getMessage());
     }
+    
+    cleanupOrphanedCurseSlots($gameId);
 }
 ?>

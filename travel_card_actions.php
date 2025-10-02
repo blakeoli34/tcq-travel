@@ -1025,4 +1025,52 @@ function peekDailyDeck($gameId, $playerId) {
         return ['success' => false, 'message' => $e->getMessage()];
     }
 }
+
+function cleanupOrphanedCurseSlots($gameId) {
+    try {
+        $pdo = Config::getDatabaseConnection();
+        $timezone = new DateTimeZone('America/Indiana/Indianapolis');
+        $today = (new DateTime('now', $timezone))->format('Y-m-d');
+        
+        // Get all players in this game
+        $stmt = $pdo->prepare("SELECT id FROM players WHERE game_id = ?");
+        $stmt->execute([$gameId]);
+        $playerIds = $stmt->fetchAll(PDO::FETCH_COLUMN);
+        
+        foreach ($playerIds as $playerId) {
+            // Get slots with curse cards that are activated
+            $stmt = $pdo->prepare("
+                SELECT dds.slot_number, dds.card_id
+                FROM daily_deck_slots dds
+                JOIN cards c ON dds.card_id = c.id
+                WHERE dds.game_id = ? AND dds.player_id = ? AND dds.deck_date = ?
+                AND c.card_category = 'curse' AND dds.curse_activated = TRUE
+            ");
+            $stmt->execute([$gameId, $playerId, $today]);
+            $curseSlots = $stmt->fetchAll();
+            
+            foreach ($curseSlots as $slot) {
+                // Check if there's an active curse effect for this slot
+                $stmt = $pdo->prepare("
+                    SELECT COUNT(*) FROM active_curse_effects 
+                    WHERE game_id = ? AND player_id = ? AND slot_number = ?
+                ");
+                $stmt->execute([$gameId, $playerId, $slot['slot_number']]);
+                $hasEffect = $stmt->fetchColumn();
+                
+                // If no active effect, clear the slot
+                if (!$hasEffect) {
+                    error_log("Cleaning orphaned curse slot {$slot['slot_number']} for player {$playerId}");
+                    completeCurseSlot($gameId, $playerId, $slot['slot_number']);
+                }
+            }
+        }
+        
+        return true;
+        
+    } catch (Exception $e) {
+        error_log("Error cleaning up orphaned curse slots: " . $e->getMessage());
+        return false;
+    }
+}
 ?>

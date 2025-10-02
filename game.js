@@ -87,6 +87,12 @@ $(document).ready(function() {
         updateCardModifiers();
         checkForDeckPeek();
         updateDailyDeckCount();
+        // Cleanup orphaned curse slots
+        fetch('game.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: 'action=cleanup_expired_effects'
+        });
     }, 5000);
     
     // Setup polling for waiting screens

@@ -206,6 +206,13 @@ function completeSnapCard($gameId, $playerId, $playerCardId) {
         
         // Clear snap modify effects
         clearSnapModifiers($gameId, $playerId);
+
+        // Track this card as completed
+        $stmt = $pdo->prepare("
+            INSERT IGNORE INTO completed_cards (game_id, player_id, card_id, card_type)
+            VALUES (?, ?, ?, 'snap')
+        ");
+        $stmt->execute([$gameId, $playerId, $card['card_id']]);
         
         // Remove card from hand
         if ($card['quantity'] > 1) {
@@ -292,6 +299,13 @@ function completeSpicyCard($gameId, $playerId, $playerCardId) {
         
         // Clear spicy modify effects
         clearSpicyModifiers($gameId, $playerId);
+
+        // Track this card as completed
+        $stmt = $pdo->prepare("
+            INSERT IGNORE INTO completed_cards (game_id, player_id, card_id, card_type)
+            VALUES (?, ?, ?, 'spicy')
+        ");
+        $stmt->execute([$gameId, $playerId, $card['card_id']]);
         
         // Remove card from hand
         if ($card['quantity'] > 1) {
@@ -417,44 +431,57 @@ function drawFromSnapDeck($gameId, $playerId) {
         
         $genderClause = $gameInfo['gender'] === 'male' ? "AND c.male = 1" : "AND c.female = 1";
         
+        // Get cards already in hand
         $stmt = $pdo->prepare("
+            SELECT card_id FROM player_cards 
+            WHERE game_id = ? AND player_id = ? AND card_type = 'snap'
+        ");
+        $stmt->execute([$gameId, $playerId]);
+        $inHand = $stmt->fetchAll(PDO::FETCH_COLUMN);
+        
+        // Get completed snap cards
+        $stmt = $pdo->prepare("
+            SELECT card_id FROM completed_cards 
+            WHERE game_id = ? AND player_id = ? AND card_type = 'snap'
+        ");
+        $stmt->execute([$gameId, $playerId]);
+        $completed = $stmt->fetchAll(PDO::FETCH_COLUMN);
+        
+        // Exclude cards in hand OR completed
+        $excludeIds = array_merge($inHand, $completed);
+        $excludeClause = "";
+        if (!empty($excludeIds)) {
+            $placeholders = str_repeat('?,', count($excludeIds) - 1) . '?';
+            $excludeClause = "AND c.id NOT IN ($placeholders)";
+        }
+        
+        $sql = "
             SELECT c.* FROM cards c
             JOIN card_travel_modes ctm ON c.id = ctm.card_id
             WHERE c.card_category = 'snap' 
             AND ctm.mode_id = ? 
             $genderClause
+            $excludeClause
             ORDER BY RAND() 
             LIMIT 1
-        ");
-        $stmt->execute([$gameInfo['travel_mode_id']]);
+        ";
+        
+        $params = array_merge([$gameInfo['travel_mode_id']], $excludeIds);
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+        
         $card = $stmt->fetch();
         
         if (!$card) {
             return ['success' => false, 'message' => 'No snap cards available'];
         }
         
-        // Add this specific card to hand
+        // Add to hand
         $stmt = $pdo->prepare("
-            SELECT quantity FROM player_cards 
-            WHERE game_id = ? AND player_id = ? AND card_id = ? AND card_type = 'snap'
+            INSERT INTO player_cards (game_id, player_id, card_id, card_type, quantity, card_points)
+            VALUES (?, ?, ?, 'snap', 1, ?)
         ");
-        $stmt->execute([$gameId, $playerId, $card['id']]);
-        $existing = $stmt->fetchColumn();
-        
-        if ($existing) {
-            $stmt = $pdo->prepare("
-                UPDATE player_cards 
-                SET quantity = quantity + 1 
-                WHERE game_id = ? AND player_id = ? AND card_id = ? AND card_type = 'snap'
-            ");
-            $stmt->execute([$gameId, $playerId, $card['id']]);
-        } else {
-            $stmt = $pdo->prepare("
-                INSERT INTO player_cards (game_id, player_id, card_id, card_type, quantity, card_points)
-                VALUES (?, ?, ?, 'snap', 1, ?)
-            ");
-            $stmt->execute([$gameId, $playerId, $card['id'], $card['card_points']]);
-        }
+        $stmt->execute([$gameId, $playerId, $card['id'], $card['card_points']]);
         
         return ['success' => true, 'card' => $card, 'message' => "Drew {$card['card_name']}"];
         
@@ -486,44 +513,57 @@ function drawFromSpicyDeck($gameId, $playerId) {
         
         $genderClause = $gameInfo['gender'] === 'male' ? "AND c.male = 1" : "AND c.female = 1";
         
+        // Get cards already in hand
         $stmt = $pdo->prepare("
+            SELECT card_id FROM player_cards 
+            WHERE game_id = ? AND player_id = ? AND card_type = 'spicy'
+        ");
+        $stmt->execute([$gameId, $playerId]);
+        $inHand = $stmt->fetchAll(PDO::FETCH_COLUMN);
+        
+        // Get completed spicy cards
+        $stmt = $pdo->prepare("
+            SELECT card_id FROM completed_cards 
+            WHERE game_id = ? AND player_id = ? AND card_type = 'spicy'
+        ");
+        $stmt->execute([$gameId, $playerId]);
+        $completed = $stmt->fetchAll(PDO::FETCH_COLUMN);
+        
+        // Exclude cards in hand OR completed
+        $excludeIds = array_merge($inHand, $completed);
+        $excludeClause = "";
+        if (!empty($excludeIds)) {
+            $placeholders = str_repeat('?,', count($excludeIds) - 1) . '?';
+            $excludeClause = "AND c.id NOT IN ($placeholders)";
+        }
+        
+        $sql = "
             SELECT c.* FROM cards c
             JOIN card_travel_modes ctm ON c.id = ctm.card_id
             WHERE c.card_category = 'spicy' 
             AND ctm.mode_id = ? 
             $genderClause
+            $excludeClause
             ORDER BY RAND() 
             LIMIT 1
-        ");
-        $stmt->execute([$gameInfo['travel_mode_id']]);
+        ";
+        
+        $params = array_merge([$gameInfo['travel_mode_id']], $excludeIds);
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+        
         $card = $stmt->fetch();
         
         if (!$card) {
             return ['success' => false, 'message' => 'No spicy cards available'];
         }
         
-        // Add this specific card to hand
+        // Add to hand
         $stmt = $pdo->prepare("
-            SELECT quantity FROM player_cards 
-            WHERE game_id = ? AND player_id = ? AND card_id = ? AND card_type = 'spicy'
+            INSERT INTO player_cards (game_id, player_id, card_id, card_type, quantity, card_points)
+            VALUES (?, ?, ?, 'spicy', 1, ?)
         ");
-        $stmt->execute([$gameId, $playerId, $card['id']]);
-        $existing = $stmt->fetchColumn();
-        
-        if ($existing) {
-            $stmt = $pdo->prepare("
-                UPDATE player_cards 
-                SET quantity = quantity + 1 
-                WHERE game_id = ? AND player_id = ? AND card_id = ? AND card_type = 'spicy'
-            ");
-            $stmt->execute([$gameId, $playerId, $card['id']]);
-        } else {
-            $stmt = $pdo->prepare("
-                INSERT INTO player_cards (game_id, player_id, card_id, card_type, quantity, card_points)
-                VALUES (?, ?, ?, 'spicy', 1, ?)
-            ");
-            $stmt->execute([$gameId, $playerId, $card['id'], $card['card_points']]);
-        }
+        $stmt->execute([$gameId, $playerId, $card['id'], $card['card_points']]);
         
         return ['success' => true, 'card' => $card, 'message' => "Drew {$card['card_name']}"];
         
@@ -563,15 +603,16 @@ function applySnapSpicyModifiers($gameId, $playerId, $basePoints, $cardType) {
         // Get active power/curse effects that modify snap/spicy cards
         $modifyField = $cardType . '_modify';
         $stmt = $pdo->prepare("
-            SELECT ace.*, c.score_modify, c.power_score_modify
+            SELECT ace.id, ace.game_id, ace.player_id, ace.card_id, ace.expires_at, 
+                   c.score_modify, NULL as power_score_modify
             FROM active_curse_effects ace
             JOIN cards c ON ace.card_id = c.id
             WHERE ace.game_id = ? AND ace.player_id = ? AND c.$modifyField = 1
             UNION
-            SELECT ape.id, ape.game_id, ape.player_id, ape.card_id, ape.expires_at, 
-                   c.score_modify, c.power_score_modify
+            SELECT ape.id, ape.game_id, ape.player_id, ape.power_card_id as card_id, ape.expires_at, 
+                   NULL as score_modify, c.power_score_modify
             FROM active_power_effects ape
-            JOIN cards c ON ape.card_id = c.id
+            JOIN cards c ON ape.power_card_id = c.id
             WHERE ape.game_id = ? AND ape.player_id = ? AND c.power_{$modifyField} = 1
         ");
         $stmt->execute([$gameId, $playerId, $gameId, $playerId]);
@@ -621,7 +662,7 @@ function clearSnapModifiers($gameId, $playerId) {
         // Clear power effects that modify snap cards
         $stmt = $pdo->prepare("
             DELETE ape FROM active_power_effects ape
-            JOIN cards c ON ape.card_id = c.id
+            JOIN cards c ON ape.power_card_id = c.id
             WHERE ape.game_id = ? AND ape.player_id = ? AND c.power_snap_modify = 1
         ");
         $stmt->execute([$gameId, $playerId]);
@@ -649,7 +690,7 @@ function clearSpicyModifiers($gameId, $playerId) {
         // Clear power effects that modify spicy cards
         $stmt = $pdo->prepare("
             DELETE ape FROM active_power_effects ape
-            JOIN cards c ON ape.card_id = c.id
+            JOIN cards c ON ape.power_card_id = c.id
             WHERE ape.game_id = ? AND ape.player_id = ? AND c.power_spicy_modify = 1
         ");
         $stmt->execute([$gameId, $playerId]);
@@ -662,18 +703,20 @@ function clearSpicyModifiers($gameId, $playerId) {
     }
 }
 
-// Around line 580, update the function
 function clearCursesByCompletion($gameId, $playerId, $completionType) {
     try {
         $pdo = Config::getDatabaseConnection();
         
         $completionField = 'complete_' . $completionType;
+        $modifyField = $completionType . '_modify';
         
+        // Get curses that require this card type to be completed OR modify this card type
         $stmt = $pdo->prepare("
             SELECT ace.id, ace.slot_number
             FROM active_curse_effects ace
             JOIN cards c ON ace.card_id = c.id
-            WHERE ace.game_id = ? AND ace.player_id = ? AND c.$completionField = 1
+            WHERE ace.game_id = ? AND ace.player_id = ? 
+            AND (c.$completionField = 1 OR c.$modifyField = 1)
         ");
         $stmt->execute([$gameId, $playerId]);
         $effects = $stmt->fetchAll();
