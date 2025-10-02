@@ -58,8 +58,11 @@ $(document).ready(function() {
         }
         checkVetoWait();
         updateStatusEffects();
-        loadHandCards();
-        updateDeckCounts();
+        if (gameData && gameData.gameStatus === 'active') {
+            loadHandCards();
+            updateDeckCounts();
+            updateDailyDeckCount();
+        }
     }, 500);
     
     // Periodic updates
@@ -74,6 +77,7 @@ $(document).ready(function() {
         updateCurseTimers();
         updateCardModifiers();
         checkForDeckPeek();
+        updateDailyDeckCount();
     }, 5000);
     
     // Setup polling for waiting screens
@@ -323,27 +327,26 @@ function updateDailyDeckDisplay(slots) {
     
     slots.forEach((slot, index) => {
         const slotElement = dailySlots[index];
-        if (!slotElement) return;
+        if (!slotElement) return; // Guard against missing elements
         
         const slotContent = slotElement.querySelector('.slot-content');
+        if (!slotContent) return; // Guard against missing content
         
         if (slot.card_id) {
-            // Slot has a card
             slotElement.classList.add('has-card');
             slotContent.innerHTML = createSlotCardHTML(slot);
 
-            // Start auto-activate timer for curse cards
             if (slot.card_category === 'curse' && !slot.curse_activated) {
                 setTimeout(() => startCurseAutoActivate(slot.slot_number), 100);
             }
         } else {
-            // Empty slot
             slotElement.classList.remove('has-card');
             slotContent.innerHTML = '<div class="empty-slot">TAP TO DRAW A CARD</div>';
         }
     });
 
-    document.querySelector('.daily-deck-container')?.classList.add('loaded');
+    const container = document.querySelector('.daily-deck-container');
+    if (container) container.classList.add('loaded');
 }
 
 function updateDailyDeckCount() {
@@ -1249,6 +1252,7 @@ function updateHandSlots() {
     
     // Clear all slots
     slots.forEach(slot => {
+        if (!slot) return;
         slot.classList.remove('filled', 'expanded');
         slot.classList.add('empty');
         slot.innerHTML = '<div class="empty-slot-indicator">Empty</div>';
@@ -1263,9 +1267,10 @@ function updateHandSlots() {
     handCards.forEach(card => {
         for (let i = 0; i < card.quantity && slotIndex < 6; i++) {
             const slot = slots[slotIndex];
+            if (!slot) continue;
+            
             slot.classList.remove('empty');
             slot.classList.add('filled');
-            
             slot.innerHTML = createHandCardHTML(card, slotIndex);
             slotIndex++;
         }
@@ -2668,6 +2673,204 @@ window.addEventListener('beforeunload', () => {
 });
 
 // ========================================
+// DICE SYSTEM
+// ========================================
+
+let currentDiceCount = 2;
+let isDiceRolling = false;
+let curseDiceCallback = null;
+
+function openDicePopover(callback = null) {
+    const popover = document.getElementById('dicePopover');
+    if (popover) {
+        if (popover.classList.contains('active')) {
+            closeDicePopover();
+            return;
+        }
+        curseDiceCallback = callback;
+        if (callback) {
+            // Auto-roll for curse
+            rollDiceChoice(2);
+        } else {
+            // Show choice for manual roll
+            showDiceChoiceButtons();
+        }
+        popover.classList.add('active');
+        setTimeout(() => {
+            document.addEventListener('click', closeDicePopoverOnClickOutside);
+        }, 100);
+    }
+}
+
+function closeDicePopover() {
+    const popover = document.getElementById('dicePopover');
+    if (popover) {
+        popover.classList.remove('active');
+        document.removeEventListener('click', closeDicePopoverOnClickOutside);
+        curseDiceCallback = null;
+    }
+}
+
+function closeDicePopoverOnClickOutside(event) {
+    const popover = document.getElementById('dicePopover');
+    if (popover && !popover.contains(event.target)) {
+        closeDicePopover();
+    }
+}
+
+function showDiceChoiceButtons() {
+    const container = document.getElementById('dicePopoverContainer');
+    container.innerHTML = `
+        <div class="dice-choice-buttons">
+            <button class="dice-choice-btn" onclick="event.stopPropagation(); rollDiceChoice(1)">1 Die</button>
+            <button class="dice-choice-btn" onclick="event.stopPropagation(); rollDiceChoice(2)">2 Dice</button>
+            <button class="dice-choice-btn" onclick="event.stopPropagation(); rollDiceChoice('sexy')">Spicy</button>
+        </div>
+    `;
+}
+
+function rollDiceChoice(count) {
+    currentDiceCount = count;
+    const container = document.getElementById('dicePopoverContainer');
+    
+    container.innerHTML = document.getElementById('diceTemplate').innerHTML;
+    
+    const die1 = container.querySelector('#die1');
+    const die2 = container.querySelector('#die2');
+    
+    if (count === 1 && die2) {
+        die2.style.display = 'none';
+    }
+    
+    if (die1) {
+        die1.onclick = (e) => {
+            e.stopPropagation();
+            playSoundIfEnabled('/dice-roll.m4r');
+            setTimeout(() => rollDice(), 300);
+        };
+    }
+    
+    if (die2 && count !== 1) {
+        die2.onclick = (e) => {
+            e.stopPropagation();
+            playSoundIfEnabled('/dice-roll.m4r');
+            setTimeout(() => rollDice(), 300);
+        };
+    }
+    
+    if (count === 'sexy') {
+        setupSexyDice();
+    } else {
+        if (gameData.currentPlayerGender) {
+            setDiceColor(gameData.currentPlayerGender);
+        }
+        initializeDicePosition();
+    }
+    
+    playSoundIfEnabled('/dice-roll.m4r');
+    setTimeout(() => rollDice(), 500);
+}
+
+function rollDice() {
+    if (isDiceRolling) return;
+    
+    isDiceRolling = true;
+    
+    let die1Value = Math.floor(Math.random() * 6) + 1;
+    let die2Value = currentDiceCount === 2 || currentDiceCount === 'sexy' 
+        ? Math.floor(Math.random() * 6) + 1 : 0;
+    
+    const die1 = document.getElementById('die1');
+    const die2 = document.getElementById('die2');
+    
+    if (die1) {
+        const extraSpins1 = Math.floor(Math.random() * 3) + 2;
+        const finalRotation1 = getDieRotationForValue(die1Value);
+        die1.style.transform = `rotateX(${finalRotation1.x + (extraSpins1 * 360)}deg) rotateY(${finalRotation1.y + (extraSpins1 * 360)}deg)`;
+    }
+    
+    if ((currentDiceCount === 2 || currentDiceCount === 'sexy') && die2) {
+        const extraSpins2 = Math.floor(Math.random() * 3) + 3;
+        const finalRotation2 = getDieRotationForValue(die2Value);
+        die2.style.transform = `rotateX(${finalRotation2.x + (extraSpins2 * 360)}deg) rotateY(${finalRotation2.y + (extraSpins2 * 360)}deg)`;
+    }
+    
+    setTimeout(() => {
+        isDiceRolling = false;
+        
+        // If curse callback, check condition
+        if (curseDiceCallback) {
+            const total = die1Value + die2Value;
+            curseDiceCallback(die1Value, die2Value, total);
+        }
+    }, 1000);
+}
+
+function getDieRotationForValue(value) {
+    const rotations = {
+        1: { x: 0, y: 0 },
+        2: { x: -90, y: 0 },
+        3: { x: 0, y: 90 },
+        4: { x: 0, y: -90 },
+        5: { x: 90, y: 0 },
+        6: { x: 0, y: 180 }
+    };
+    return rotations[value];
+}
+
+function setDieRotation(die, value) {
+    const rotation = getDieRotationForValue(value);
+    die.style.transform = `rotateX(${rotation.x}deg) rotateY(${rotation.y}deg)`;
+}
+
+function initializeDicePosition() {
+    const die1 = document.getElementById('die1');
+    const die2 = document.getElementById('die2');
+    
+    if (die1) setDieRotation(die1, 1);
+    if (die2 && currentDiceCount !== 1) setDieRotation(die2, 1);
+}
+
+function setDiceColor(gender) {
+    document.querySelectorAll('.die').forEach(die => {
+        die.className = `die ${gender}`;
+        if (die.id === 'die2') {
+            die.classList.add('two');
+        }
+    });
+}
+
+function setupSexyDice() {
+    const die1 = document.getElementById('die1');
+    const die2 = document.getElementById('die2');
+    
+    if (!die1 || !die2) return;
+    
+    const actions = ['Rub', 'Pinch', 'Kiss', 'Lick', 'Suck', 'Do Whatever You Want to'];
+    const bodyParts = gameData.currentPlayerGender === 'female' 
+        ? ['His Booty', 'His Neck', 'His Nipples', 'Your Choice', 'His Penis', 'His Balls']
+        : ['Her Booty', 'Her Neck', 'Her Boobs', 'Her Nipples', 'Your Choice', 'Her Vagina'];
+    
+    const die1Faces = die1.querySelectorAll('.die-face');
+    die1Faces.forEach((face, index) => {
+        face.classList.add('sexy');
+        face.innerHTML = `<div class="die-text">${actions[index]}</div>`;
+    });
+    
+    const die2Faces = die2.querySelectorAll('.die-face');
+    die2Faces.forEach((face, index) => {
+        face.classList.add('sexy');
+        face.innerHTML = `<div class="die-text">${bodyParts[index]}</div>`;
+    });
+    
+    if (gameData.currentPlayerGender) {
+        setDiceColor(gameData.currentPlayerGender);
+    }
+    
+    initializeDicePosition();
+}
+
+// ========================================
 // MAKE FUNCTIONS GLOBALLY AVAILABLE
 // ========================================
 
@@ -2682,6 +2885,11 @@ window.toggleScoreBugExpanded = toggleScoreBugExpanded;
 window.adjustScore = adjustScore;
 window.stealPoints = stealPoints;
 window.drawAllSlots = drawAllSlots;
+
+// Dice functions
+window.openDicePopover = openDicePopover;
+window.closeDicePopover = closeDicePopover;
+window.rollDiceChoice = rollDiceChoice;
 
 // Modal functions
 window.openNotifyModal = openNotifyModal;

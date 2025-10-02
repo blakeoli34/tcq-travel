@@ -98,6 +98,23 @@ function playPowerCard($gameId, $playerId, $playerCardId) {
             $stmt = $pdo->prepare("DELETE FROM player_cards WHERE id = ?");
             $stmt->execute([$playerCardId]);
         }
+
+        $opponentId = getOpponentPlayerId($gameId, $playerId);
+        $stmt = $pdo->prepare("SELECT fcm_token, first_name FROM players WHERE id = ?");
+        $stmt->execute([$opponentId]);
+        $opponent = $stmt->fetch();
+
+        if ($opponent['fcm_token']) {
+            $stmt = $pdo->prepare("SELECT first_name FROM players WHERE id = ?");
+            $stmt->execute([$playerId]);
+            $playerName = $stmt->fetchColumn();
+            
+            sendPushNotification(
+                $opponent['fcm_token'],
+                'Power Card Activated',
+                "{$playerName} used: {$card['card_name']}"
+            );
+        }
         
         $pdo->commit();
         return ['success' => true, 'effects' => $effects];
@@ -202,6 +219,23 @@ function completeSnapCard($gameId, $playerId, $playerCardId) {
             $stmt = $pdo->prepare("DELETE FROM player_cards WHERE id = ?");
             $stmt->execute([$playerCardId]);
         }
+
+        $opponentId = getOpponentPlayerId($gameId, $playerId);
+        $stmt = $pdo->prepare("SELECT fcm_token, first_name FROM players WHERE id = ?");
+        $stmt->execute([$opponentId]);
+        $opponent = $stmt->fetch();
+
+        if ($opponent['fcm_token']) {
+            $stmt = $pdo->prepare("SELECT first_name FROM players WHERE id = ?");
+            $stmt->execute([$playerId]);
+            $playerName = $stmt->fetchColumn();
+            
+            sendPushNotification(
+                $opponent['fcm_token'],
+                'Snap Card Completed',
+                "{$playerName} completed: {$card['card_name']}"
+            );
+        }
         
         $pdo->commit();
         return ['success' => true, 'effects' => $effects, 'points_awarded' => $finalPoints];
@@ -270,6 +304,23 @@ function completeSpicyCard($gameId, $playerId, $playerCardId) {
         } else {
             $stmt = $pdo->prepare("DELETE FROM player_cards WHERE id = ?");
             $stmt->execute([$playerCardId]);
+        }
+
+        $opponentId = getOpponentPlayerId($gameId, $playerId);
+        $stmt = $pdo->prepare("SELECT fcm_token, first_name FROM players WHERE id = ?");
+        $stmt->execute([$opponentId]);
+        $opponent = $stmt->fetch();
+
+        if ($opponent['fcm_token']) {
+            $stmt = $pdo->prepare("SELECT first_name FROM players WHERE id = ?");
+            $stmt->execute([$playerId]);
+            $playerName = $stmt->fetchColumn();
+            
+            sendPushNotification(
+                $opponent['fcm_token'],
+                'Spicy Card Completed',
+                "{$playerName} completed: {$card['card_name']}"
+            );
         }
         
         $pdo->commit();
@@ -354,19 +405,28 @@ function drawFromSnapDeck($gameId, $playerId) {
             return ['success' => false, 'message' => 'Hand is full (6 cards maximum)'];
         }
         
-        // Get player gender and random card
-        $stmt = $pdo->prepare("SELECT gender FROM players WHERE id = ?");
-        $stmt->execute([$playerId]);
-        $playerGender = $stmt->fetchColumn();
-        
-        $genderClause = $playerGender === 'male' ? "AND male = 1" : "AND female = 1";
+        // Get player gender and travel mode
         $stmt = $pdo->prepare("
-            SELECT * FROM cards 
-            WHERE card_category = 'snap' $genderClause
+            SELECT p.gender, g.travel_mode_id 
+            FROM players p 
+            JOIN games g ON p.game_id = g.id 
+            WHERE p.id = ?
+        ");
+        $stmt->execute([$playerId]);
+        $gameInfo = $stmt->fetch();
+        
+        $genderClause = $gameInfo['gender'] === 'male' ? "AND c.male = 1" : "AND c.female = 1";
+        
+        $stmt = $pdo->prepare("
+            SELECT c.* FROM cards c
+            JOIN card_travel_modes ctm ON c.id = ctm.card_id
+            WHERE c.card_category = 'snap' 
+            AND ctm.mode_id = ? 
+            $genderClause
             ORDER BY RAND() 
             LIMIT 1
         ");
-        $stmt->execute();
+        $stmt->execute([$gameInfo['travel_mode_id']]);
         $card = $stmt->fetch();
         
         if (!$card) {
@@ -414,19 +474,28 @@ function drawFromSpicyDeck($gameId, $playerId) {
             return ['success' => false, 'message' => 'Hand is full (6 cards maximum)'];
         }
         
-        // Get player gender and random card
-        $stmt = $pdo->prepare("SELECT gender FROM players WHERE id = ?");
-        $stmt->execute([$playerId]);
-        $playerGender = $stmt->fetchColumn();
-        
-        $genderClause = $playerGender === 'male' ? "AND male = 1" : "AND female = 1";
+        // Get player gender and travel mode
         $stmt = $pdo->prepare("
-            SELECT * FROM cards 
-            WHERE card_category = 'spicy' $genderClause
+            SELECT p.gender, g.travel_mode_id 
+            FROM players p 
+            JOIN games g ON p.game_id = g.id 
+            WHERE p.id = ?
+        ");
+        $stmt->execute([$playerId]);
+        $gameInfo = $stmt->fetch();
+        
+        $genderClause = $gameInfo['gender'] === 'male' ? "AND c.male = 1" : "AND c.female = 1";
+        
+        $stmt = $pdo->prepare("
+            SELECT c.* FROM cards c
+            JOIN card_travel_modes ctm ON c.id = ctm.card_id
+            WHERE c.card_category = 'spicy' 
+            AND ctm.mode_id = ? 
+            $genderClause
             ORDER BY RAND() 
             LIMIT 1
         ");
-        $stmt->execute();
+        $stmt->execute([$gameInfo['travel_mode_id']]);
         $card = $stmt->fetch();
         
         if (!$card) {
@@ -593,13 +662,13 @@ function clearSpicyModifiers($gameId, $playerId) {
     }
 }
 
+// Around line 580, update the function
 function clearCursesByCompletion($gameId, $playerId, $completionType) {
     try {
         $pdo = Config::getDatabaseConnection();
         
         $completionField = 'complete_' . $completionType;
         
-        // Get curse effects that are cleared by this completion type
         $stmt = $pdo->prepare("
             SELECT ace.id, ace.slot_number
             FROM active_curse_effects ace

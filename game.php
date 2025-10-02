@@ -32,6 +32,38 @@ $stmt = $pdo->prepare("SELECT * FROM games WHERE id = ?");
 $stmt->execute([$player['game_id']]);
 $gameData = $stmt->fetch();
 
+if ($gameData['status'] === 'active' && $gameData['start_date']) {
+    $timezone = new DateTimeZone('America/Indiana/Indianapolis');
+    $now = new DateTime('now', $timezone);
+    $startDate = new DateTime($gameData['start_date'], $timezone);
+    
+    if ($now < $startDate) {
+        // Reset to waiting
+        $stmt = $pdo->prepare("UPDATE games SET status = 'waiting' WHERE id = ?");
+        $stmt->execute([$player['game_id']]);
+        $gameData['status'] = 'waiting';
+        $gameStatus = 'waiting';
+    }
+}
+
+// Auto-activate games that have reached their start time
+if ($gameData['status'] === 'waiting' && $gameData['start_date']) {
+    $timezone = new DateTimeZone('America/Indiana/Indianapolis');
+    $now = new DateTime('now', $timezone);
+    $startDate = new DateTime($gameData['start_date'], $timezone);
+    
+    if ($now >= $startDate) {
+        // Activate the game
+        $stmt = $pdo->prepare("UPDATE games SET status = 'active' WHERE id = ?");
+        $stmt->execute([$player['game_id']]);
+        $gameData['status'] = 'active';
+        $gameStatus = 'active';
+        
+        // Initialize Travel Edition
+        initializeTravelEdition($player['game_id']);
+    }
+}
+
 $players = getGamePlayers($player['game_id']);
 $currentPlayer = null;
 $opponentPlayer = null;
@@ -521,6 +553,78 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             ]);
             exit;
 
+        case 'check_curse_dice':
+            $effectId = intval($_POST['effect_id']);
+            $die1 = intval($_POST['die1']);
+            $die2 = intval($_POST['die2']);
+            $total = intval($_POST['total']);
+            
+            try {
+                $pdo = Config::getDatabaseConnection();
+                
+                // Get curse effect details
+                $stmt = $pdo->prepare("
+                    SELECT ace.*, c.dice_condition, c.dice_threshold, c.slot_number
+                    FROM active_curse_effects ace
+                    JOIN cards c ON ace.card_id = c.id
+                    WHERE ace.id = ?
+                ");
+                $stmt->execute([$effectId]);
+                $curse = $stmt->fetch();
+                
+                if (!$curse) {
+                    echo json_encode(['success' => false, 'message' => 'Curse not found']);
+                    exit;
+                }
+                
+                $cleared = false;
+                
+                switch ($curse['dice_condition']) {
+                    case 'even':
+                        $cleared = ($total % 2 === 0);
+                        break;
+                    case 'odd':
+                        $cleared = ($total % 2 !== 0);
+                        break;
+                    case 'doubles':
+                        $cleared = ($die1 === $die2);
+                        break;
+                    case 'above':
+                        $cleared = ($total > $curse['dice_threshold']);
+                        break;
+                    case 'below':
+                        $cleared = ($total < $curse['dice_threshold']);
+                        break;
+                }
+                
+                if ($cleared) {
+                    // Clear curse
+                    $stmt = $pdo->prepare("DELETE FROM active_curse_effects WHERE id = ?");
+                    $stmt->execute([$effectId]);
+                    
+                    if ($curse['slot_number']) {
+                        completeCurseSlot($player['game_id'], $player['id'], $curse['slot_number']);
+                    }
+                    
+                    echo json_encode([
+                        'success' => true,
+                        'cleared' => true,
+                        'message' => 'Curse cleared!'
+                    ]);
+                } else {
+                    echo json_encode([
+                        'success' => true,
+                        'cleared' => false,
+                        'message' => 'Curse remains active'
+                    ]);
+                }
+                
+            } catch (Exception $e) {
+                error_log("Error checking curse dice: " . $e->getMessage());
+                echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+            }
+            exit;
+
         case 'cleanup_expired_effects':
             if ($gameMode !== 'digital') {
                 echo json_encode(['success' => false, 'message' => 'Not a digital game']);
@@ -603,23 +707,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             
             try {
                 $pdo = Config::getDatabaseConnection();
+
+                $status = $start <= new DateTime('now', $timezone) ? 'active' : 'waiting';
+
                 $stmt = $pdo->prepare("
                     UPDATE games 
-                    SET start_date = ?, end_date = ?, status = 'active', duration_days = ?
+                    SET start_date = ?, end_date = ?, status = ?, duration_days = ?
                     WHERE id = ?
                 ");
                 $stmt->execute([
                     $start->format('Y-m-d H:i:s'), 
-                    $end->format('Y-m-d H:i:s'), 
+                    $end->format('Y-m-d H:i:s'),
+                    $status,
                     $daysDiff + 1, 
                     $player['game_id']
                 ]);
                 
-                // Initialize Travel Edition
-                $initResult = initializeTravelEdition($player['game_id']);
-                if (!$initResult['success']) {
-                    echo json_encode(['success' => false, 'message' => 'Failed to initialize game']);
-                    exit;
+                // Only initialize if status is active
+                if ($status === 'active') {
+                    $initResult = initializeTravelEdition($player['game_id']);
+                    if (!$initResult['success']) {
+                        echo json_encode(['success' => false, 'message' => 'Failed to initialize game']);
+                        exit;
+                    }
                 }
                 
                 echo json_encode(['success' => true]);
@@ -840,7 +950,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover, maximum-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
     <title>TCQ Travel Edition</title>
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -941,7 +1051,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 <button class="btn" onclick="setGameDates()" id="setDatesBtn">Start Adventure</button>
             </div>
 
-        <?php elseif ($gameStatus === 'waiting' && $gameData['start_date'] && new DateTime($gameData['start_date']) > new DateTime('now', new DateTimeZone('America/Indiana/Indianapolis'))): ?>
+        <?php elseif ($gameStatus === 'waiting' && $gameData['start_date']): 
+            $timezone = new DateTimeZone('America/Indiana/Indianapolis');
+            $now = new DateTime('now', $timezone);
+            $startDate = new DateTime($gameData['start_date'], $timezone);
+            
+            if ($now < $startDate):
+        ?>
             <!-- Waiting for start date -->
             <div class="waiting-screen start-date-wait">
                 <h2>Adventure Starts Soon!</h2>
@@ -950,7 +1066,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 <div id="startCountdown" style="font-size: 48px; font-weight: 900; margin: 30px 0;"></div>
             </div>
             
-        <?php elseif ($gameStatus === 'completed'): ?>
+        <?php endif; // Close the $now < $startDate check
+        elseif ($gameStatus === 'completed'): ?>
             <!-- Game ended -->
             <?php 
             $winner = $players[0]['score'] > $players[1]['score'] ? $players[0] : $players[1];
@@ -1082,8 +1199,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                         <div class="deck-message-text">Tap to Draw 3 Cards</div>
                     </div>
                 </div>
-
-                <div class="daily-deck-count" id="dailyDeckCount" style="display: none;"></div>
                 
                 <div class="veto-wait-overlay" id="vetoWaitOverlay" style="display: none;">
                     <div class="veto-message">Wait to Play</div>
@@ -1120,6 +1235,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 <div class="score-bug-content">
                     <!-- Expanded Content (hidden above) -->
                     <div class="score-bug-expanded-content" id="scoreBugExpandedContent">
+                        <!-- Dice Roller -->
+                        <div class="dice-roller-section">
+                            <i class="fa-solid fa-dice" onclick="event.stopPropagation(); openDicePopover()"></i>
+                        </div>
                         <!-- Awards Progress Section -->
                         <div class="awards-section">
                             <h3>Awards Progress</h3>
@@ -1355,6 +1474,58 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             <div class="modal-buttons">
                 <button class="btn dark" onclick="closeModal('endGameModal')">No</button>
                 <button class="btn red" onclick="endGame()">Yes</button>
+            </div>
+        </div>
+    </div>
+    <!-- Dice Overlay -->
+    <div class="dice-popover" id="dicePopover">
+        <div id="dicePopoverContainer"></div>
+    </div>
+
+    <!-- Hidden template for dice HTML -->
+    <div id="diceTemplate" style="display: none;">
+        <div class="dice-container" id="diceContainer">
+            <div class="die male" id="die1">
+                <div class="die-face front face-1"><div class="die-dot"></div></div>
+                <div class="die-face back face-6">
+                    <div class="die-dot"></div><div class="die-dot"></div><div class="die-dot"></div>
+                    <div class="die-dot"></div><div class="die-dot"></div><div class="die-dot"></div>
+                </div>
+                <div class="die-face right face-3">
+                    <div class="die-dot"></div><div class="die-dot"></div><div class="die-dot"></div>
+                </div>
+                <div class="die-face left face-4">
+                    <div class="die-dot"></div><div class="die-dot"></div>
+                    <div class="die-dot"></div><div class="die-dot"></div>
+                </div>
+                <div class="die-face top face-2">
+                    <div class="die-dot"></div><div class="die-dot"></div>
+                </div>
+                <div class="die-face bottom face-5">
+                    <div class="die-dot"></div><div class="die-dot"></div><div class="die-dot"></div>
+                    <div class="die-dot"></div><div class="die-dot"></div>
+                </div>
+            </div>
+            <div class="die male two" id="die2">
+                <div class="die-face front face-1"><div class="die-dot"></div></div>
+                <div class="die-face back face-6">
+                    <div class="die-dot"></div><div class="die-dot"></div><div class="die-dot"></div>
+                    <div class="die-dot"></div><div class="die-dot"></div><div class="die-dot"></div>
+                </div>
+                <div class="die-face right face-3">
+                    <div class="die-dot"></div><div class="die-dot"></div><div class="die-dot"></div>
+                </div>
+                <div class="die-face left face-4">
+                    <div class="die-dot"></div><div class="die-dot"></div>
+                    <div class="die-dot"></div><div class="die-dot"></div>
+                </div>
+                <div class="die-face top face-2">
+                    <div class="die-dot"></div><div class="die-dot"></div>
+                </div>
+                <div class="die-face bottom face-5">
+                    <div class="die-dot"></div><div class="die-dot"></div><div class="die-dot"></div>
+                    <div class="die-dot"></div><div class="die-dot"></div>
+                </div>
             </div>
         </div>
     </div>

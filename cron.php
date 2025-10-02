@@ -22,6 +22,9 @@ switch ($action) {
     case 'daily':
         sendDailyNotifications();
         break;
+    case 'end':
+        endOfDayNotification();
+        break;
     case 'cleanup':
         cleanupExpiredGames();
         break;
@@ -45,6 +48,26 @@ switch ($action) {
 
 function sendDailyNotifications() {
     error_log("Starting daily deck notifications...");
+    
+    // Activate games that have reached their start time
+    $timezone = new DateTimeZone('America/Indiana/Indianapolis');
+    $now = new DateTime('now', $timezone);
+
+    $stmt = $pdo->query("
+        SELECT id FROM games 
+        WHERE status = 'waiting' 
+        AND start_date IS NOT NULL 
+        AND start_date <= NOW()
+    ");
+    $gamesToActivate = $stmt->fetchAll(PDO::FETCH_COLUMN);
+
+    foreach ($gamesToActivate as $gameId) {
+        $stmt = $pdo->prepare("UPDATE games SET status = 'active' WHERE id = ?");
+        $stmt->execute([$gameId]);
+        
+        // Initialize Travel Edition for this game
+        initializeTravelEdition($gameId);
+    }
     
     try {
         $pdo = Config::getDatabaseConnection();
@@ -112,6 +135,37 @@ function sendDailyNotifications() {
         
     } catch (Exception $e) {
         error_log("Error in sendDailyNotifications: " . $e->getMessage());
+    }
+}
+
+function endOfDayNotification() {
+
+    // Get players in active digital games that started today or earlier
+    $stmt = $pdo->query("
+        SELECT g.id as game_id, g.start_date, g.end_date,
+                p.id, p.first_name, p.gender, p.score, p.fcm_token,
+                opponent.first_name as opponent_name, opponent.score as opponent_score
+        FROM games g
+        JOIN players p ON g.id = p.game_id
+        JOIN players opponent ON g.id = opponent.game_id AND opponent.id != p.id
+        WHERE g.status = 'active' 
+        AND g.game_mode = 'digital'
+        AND g.start_date <= NOW()
+        AND p.fcm_token IS NOT NULL 
+        AND p.fcm_token != ''
+    ");
+    
+    $players = $stmt->fetchAll();
+    error_log("Found " . count($players) . " players for daily deck notifications");
+
+    foreach ($players as $player) {
+        if ($player['fcm_token']) {
+            sendPushNotification(
+                $player['fcm_token'],
+                'Day Ending Soon!',
+                "Only a few hours left to complete challenges today!"
+            );
+        }
     }
 }
 
@@ -189,6 +243,18 @@ function checkExpiredTimers($specificTimerId = null) {
                 // Delete timer
                 $stmt = $pdo->prepare("DELETE FROM timers WHERE id = ?");
                 $stmt->execute([$timer['id']]);
+
+                // In checkExpiredTimers, after clearing timer, add:
+                if ($timer['fcm_token']) {
+                    // Check if this is a veto wait timer
+                    $stmt = $pdo->prepare("SELECT veto_wait_until FROM players WHERE id = ?");
+                    $stmt->execute([$timer['player_id']]);
+                    $vetoWait = $stmt->fetchColumn();
+                    
+                    if (!$vetoWait || strtotime($vetoWait) <= time()) {
+                        notifyVetoWaitEnd($timer['game_id'], $timer['player_id']);
+                    }
+                }
                 
             } catch (Exception $e) {
                 error_log("Error processing timer {$timer['id']}: " . $e->getMessage());

@@ -48,6 +48,24 @@ function completeChallenge($gameId, $playerId, $slotNumber) {
         
         // Clear challenge modify effects
         clearChallengeModifiers($gameId, $playerId);
+
+        // Notify opponent
+        $opponentId = getOpponentPlayerId($gameId, $playerId);
+        $stmt = $pdo->prepare("SELECT fcm_token, first_name FROM players WHERE id = ?");
+        $stmt->execute([$opponentId]);
+        $opponent = $stmt->fetch();
+
+        if ($opponent['fcm_token']) {
+            $stmt = $pdo->prepare("SELECT first_name FROM players WHERE id = ?");
+            $stmt->execute([$playerId]);
+            $playerName = $stmt->fetchColumn();
+            
+            sendPushNotification(
+                $opponent['fcm_token'],
+                'Challenge Completed',
+                "{$playerName} completed {$card['card_name']} and earned {$finalPoints} points"
+            );
+        }
         
         $pdo->commit();
         return ['success' => true, 'points_awarded' => $finalPoints];
@@ -118,6 +136,25 @@ function vetoChallenge($gameId, $playerId, $slotNumber) {
         
         // Clear slot
         clearSlot($gameId, $playerId, $slotNumber);
+
+        // Notify opponent
+        $opponentId = getOpponentPlayerId($gameId, $playerId);
+        $stmt = $pdo->prepare("SELECT fcm_token FROM players WHERE id = ?");
+        $stmt->execute([$opponentId]);
+        $opponentToken = $stmt->fetchColumn();
+
+        if ($opponentToken) {
+            $stmt = $pdo->prepare("SELECT first_name FROM players WHERE id = ?");
+            $stmt->execute([$playerId]);
+            $playerName = $stmt->fetchColumn();
+            
+            $penaltyText = implode(', ', $penalties);
+            sendPushNotification(
+                $opponentToken,
+                'Challenge Vetoed',
+                "{$playerName} vetoed {$card['card_name']}. Penalties: {$penaltyText}"
+            );
+        }
         
         $pdo->commit();
         return ['success' => true, 'penalties' => $penalties];
@@ -207,6 +244,21 @@ function completeBattle($gameId, $playerId, $slotNumber, $isWinner) {
         
         // Mark slot as completed
         completeClearSlot($gameId, $playerId, $slotNumber);
+
+        $players = getGamePlayers($gameId);
+        foreach ($players as $p) {
+            if ($p['fcm_token'] && $p['id'] === $opponentId) {
+                $stmt = $pdo->prepare("SELECT first_name FROM players WHERE id = ?");
+                $stmt->execute([$playerId]);
+                $playerName = $stmt->fetchColumn();
+                
+                $message = $isWinner 
+                    ? "{$playerName} won the battle: {$card['card_name']}"
+                    : "{$playerName} lost the battle: {$card['card_name']}";
+                
+                sendPushNotification($p['fcm_token'], 'Battle Complete', $message);
+            }
+        }
         
         $pdo->commit();
         return ['success' => true, 'results' => $results];
@@ -403,20 +455,28 @@ function addSnapCards($gameId, $playerId, $count) {
     try {
         $pdo = Config::getDatabaseConnection();
         
-        // Get player gender for filtering
-        $stmt = $pdo->prepare("SELECT gender FROM players WHERE id = ?");
-        $stmt->execute([$playerId]);
-        $playerGender = $stmt->fetchColumn();
-        
-        // Get random snap cards appropriate for player gender
-        $genderClause = $playerGender === 'male' ? "AND male = 1" : "AND female = 1";
+        // Get player gender and travel mode
         $stmt = $pdo->prepare("
-            SELECT * FROM cards 
-            WHERE card_category = 'snap' $genderClause
+            SELECT p.gender, g.travel_mode_id 
+            FROM players p 
+            JOIN games g ON p.game_id = g.id 
+            WHERE p.id = ?
+        ");
+        $stmt->execute([$playerId]);
+        $gameInfo = $stmt->fetch();
+        
+        $genderClause = $gameInfo['gender'] === 'male' ? "AND c.male = 1" : "AND c.female = 1";
+        
+        $stmt = $pdo->prepare("
+            SELECT c.* FROM cards c
+            JOIN card_travel_modes ctm ON c.id = ctm.card_id
+            WHERE c.card_category = 'snap' 
+            AND ctm.mode_id = ? 
+            $genderClause
             ORDER BY RAND() 
             LIMIT ?
         ");
-        $stmt->execute([$count]);
+        $stmt->execute([$gameInfo['travel_mode_id'], $count]);
         $cards = $stmt->fetchAll();
         
         foreach ($cards as $card) {
@@ -458,20 +518,28 @@ function addSpicyCards($gameId, $playerId, $count) {
     try {
         $pdo = Config::getDatabaseConnection();
         
-        // Get player gender for filtering
-        $stmt = $pdo->prepare("SELECT gender FROM players WHERE id = ?");
-        $stmt->execute([$playerId]);
-        $playerGender = $stmt->fetchColumn();
-        
-        // Get random spicy cards appropriate for player gender
-        $genderClause = $playerGender === 'male' ? "AND male = 1" : "AND female = 1";
+        // Get player gender and travel mode
         $stmt = $pdo->prepare("
-            SELECT * FROM cards 
-            WHERE card_category = 'spicy' $genderClause
+            SELECT p.gender, g.travel_mode_id 
+            FROM players p 
+            JOIN games g ON p.game_id = g.id 
+            WHERE p.id = ?
+        ");
+        $stmt->execute([$playerId]);
+        $gameInfo = $stmt->fetch();
+        
+        $genderClause = $gameInfo['gender'] === 'male' ? "AND c.male = 1" : "AND c.female = 1";
+        
+        $stmt = $pdo->prepare("
+            SELECT c.* FROM cards c
+            JOIN card_travel_modes ctm ON c.id = ctm.card_id
+            WHERE c.card_category = 'spicy' 
+            AND ctm.mode_id = ? 
+            $genderClause
             ORDER BY RAND() 
             LIMIT ?
         ");
-        $stmt->execute([$count]);
+        $stmt->execute([$gameInfo['travel_mode_id'], $count]);
         $cards = $stmt->fetchAll();
         
         foreach ($cards as $card) {
@@ -644,6 +712,17 @@ function processCurseCard($gameId, $playerId, $card) {
     // Dice effects
     if ($card['roll_dice']) {
         $effects[] = "Roll dice to determine if curse is cleared";
+        
+        // If there's a dice condition, we need to wait for the roll
+        if ($card['dice_condition']) {
+            // Store curse with pending dice roll
+            $stmt = $pdo->prepare("
+                UPDATE active_curse_effects 
+                SET pending_dice_roll = TRUE 
+                WHERE id = ?
+            ");
+            $stmt->execute([$effectId]);
+        }
     }
     
     // Completion requirements

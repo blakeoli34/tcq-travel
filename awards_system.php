@@ -45,6 +45,20 @@ function updateSnapCardCompletion($gameId, $playerId) {
         if ($awardPoints > 0) {
             updateScore($gameId, $playerId, $awardPoints, $playerId);
             recordPlayerAward($gameId, $playerId, 'snap_level', $snapCount, $awardPoints);
+            $players = getGamePlayers($gameId);
+            foreach ($players as $p) {
+                if ($p['fcm_token']) {
+                    $stmt = $pdo->prepare("SELECT first_name FROM players WHERE id = ?");
+                    $stmt->execute([$playerId]);
+                    $playerName = $stmt->fetchColumn();
+                    
+                    $message = $p['id'] === $playerId 
+                        ? "You leveled up! Earned {$awardPoints} points"
+                        : "{$playerName} leveled up and earned {$awardPoints} points!";
+                    
+                    sendPushNotification($p['fcm_token'], 'Snap Award!', $message);
+                }
+            }
             return ['award_points' => $awardPoints, 'level' => $snapCount];
         }
         
@@ -77,6 +91,20 @@ function updateSpicyCardCompletion($gameId, $playerId) {
         if ($awardPoints > 0) {
             updateScore($gameId, $playerId, $awardPoints, $playerId);
             recordPlayerAward($gameId, $playerId, 'spicy_level', $spicyCount, $awardPoints);
+            $players = getGamePlayers($gameId);
+            foreach ($players as $p) {
+                if ($p['fcm_token']) {
+                    $stmt = $pdo->prepare("SELECT first_name FROM players WHERE id = ?");
+                    $stmt->execute([$playerId]);
+                    $playerName = $stmt->fetchColumn();
+                    
+                    $message = $p['id'] === $playerId 
+                        ? "You leveled up! Earned {$awardPoints} points"
+                        : "{$playerName} leveled up and earned {$awardPoints} points!";
+                    
+                    sendPushNotification($p['fcm_token'], 'Spicy Award!', $message);
+                }
+            }
             return ['award_points' => $awardPoints, 'level' => $spicyCount];
         }
         

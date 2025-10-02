@@ -139,6 +139,25 @@ function updateScore($gameId, $playerId, $pointsToAdd, $modifiedBy) {
             VALUES (?, ?, ?, ?, ?, ?)
         ");
         $stmt->execute([$gameId, $playerId, $modifiedBy, $currentScore, $newScore, $pointsToAdd]);
+
+        // If points are negative (stolen/lost), notify
+        if ($pointsToAdd < 0) {
+            $stmt = $pdo->prepare("SELECT fcm_token, first_name FROM players WHERE id = ?");
+            $stmt->execute([$playerId]);
+            $loser = $stmt->fetch();
+            
+            $stmt = $pdo->prepare("SELECT first_name FROM players WHERE id = ?");
+            $stmt->execute([$modifiedBy]);
+            $modifierName = $stmt->fetchColumn();
+            
+            if ($loser['fcm_token'] && $modifiedBy !== $playerId) {
+                sendPushNotification(
+                    $loser['fcm_token'],
+                    'Points Stolen!',
+                    "{$modifierName} stole " . abs($pointsToAdd) . " points from you"
+                );
+            }
+        }
         
         $pdo->commit();
 

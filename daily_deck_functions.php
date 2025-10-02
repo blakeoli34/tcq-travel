@@ -427,6 +427,21 @@ function applyVetoWait($gameId, $playerId, $minutes) {
     }
 }
 
+function notifyVetoWaitEnd($gameId, $playerId) {
+    try {
+        $pdo = Config::getDatabaseConnection();
+        $stmt = $pdo->prepare("SELECT fcm_token FROM players WHERE id = ?");
+        $stmt->execute([$playerId]);
+        $token = $stmt->fetchColumn();
+        
+        if ($token) {
+            sendPushNotification($token, 'Wait Period Over', 'You can now interact with your daily deck!');
+        }
+    } catch (Exception $e) {
+        error_log("Error sending veto wait notification: " . $e->getMessage());
+    }
+}
+
 function clearExpiredDailyDecks($gameId) {
     try {
         $pdo = Config::getDatabaseConnection();
