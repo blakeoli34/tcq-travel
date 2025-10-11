@@ -127,6 +127,47 @@ function generateDailyDeck($gameId, $playerId) {
     }
 }
 
+function clearDailyDeck($gameId, $playerId) {
+    try {
+        $pdo = Config::getDatabaseConnection();
+        $timezone = new DateTimeZone('America/Indiana/Indianapolis');
+        $today = (new DateTime('now', $timezone))->format('Y-m-d');
+        
+        $pdo->beginTransaction();
+        
+        // Get deck ID
+        $stmt = $pdo->prepare("SELECT id FROM daily_decks WHERE game_id = ? AND player_id = ? AND deck_date = ?");
+        $stmt->execute([$gameId, $playerId, $today]);
+        $deckId = $stmt->fetchColumn();
+        
+        if ($deckId) {
+            // Clear deck cards
+            $stmt = $pdo->prepare("DELETE FROM daily_deck_cards WHERE deck_id = ?");
+            $stmt->execute([$deckId]);
+            
+            // Clear deck slots
+            $stmt = $pdo->prepare("DELETE FROM daily_deck_slots WHERE game_id = ? AND player_id = ? AND deck_date = ?");
+            $stmt->execute([$gameId, $playerId, $today]);
+            
+            // Clear deck
+            $stmt = $pdo->prepare("DELETE FROM daily_decks WHERE id = ?");
+            $stmt->execute([$deckId]);
+        }
+        
+        // If this player drew the battle card, clear that too
+        $stmt = $pdo->prepare("DELETE FROM daily_battle_card WHERE game_id = ? AND battle_date = ? AND drawn_by_player_id = ?");
+        $stmt->execute([$gameId, $today, $playerId]);
+        
+        $pdo->commit();
+        return ['success' => true];
+        
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        error_log("Error clearing daily deck: " . $e->getMessage());
+        return ['success' => false, 'message' => $e->getMessage()];
+    }
+}
+
 function selectRandomCardsForPlayer($gameId, $playerId, $category, $count, $excludeIds = []) {
     try {
         $pdo = Config::getDatabaseConnection();
@@ -140,40 +181,22 @@ function selectRandomCardsForPlayer($gameId, $playerId, $category, $count, $excl
             $params = array_merge($params, $excludeIds);
         }
         
-        // Get cards with their quantities, accounting for already used copies
         $sql = "
-            SELECT c.*, 
-                   c.quantity as max_quantity,
-                   COALESCE(used_counts.used, 0) as already_used,
-                   (c.quantity - COALESCE(used_counts.used, 0)) as available
-            FROM cards c
+            SELECT c.* FROM cards c
             JOIN card_travel_modes ctm ON c.id = ctm.card_id
             JOIN games g ON g.travel_mode_id = ctm.mode_id
-            LEFT JOIN (
-                SELECT ddc.card_id, COUNT(*) as used
-                FROM daily_deck_cards ddc
-                JOIN daily_decks dd ON ddc.deck_id = dd.id
-                WHERE dd.game_id = ?
-                GROUP BY ddc.card_id
-            ) used_counts ON c.id = used_counts.card_id
             WHERE c.card_category = ? AND g.id = ? $excludeClause
-            HAVING available > 0
-            ORDER BY RAND()
+            ORDER BY RAND() 
+            LIMIT ?
         ";
         
-        // Adjust params order for the LEFT JOIN subquery
-        array_unshift($params, $gameId);
-        
         $stmt = $pdo->prepare($sql);
+        $params[] = $count;
         $stmt->execute($params);
         
-        $selectedCards = [];
-        while ($count > 0 && ($card = $stmt->fetch())) {
-            $selectedCards[] = $card;
-            $count--;
-        }
+        $result = $stmt->fetchAll();
         
-        return $selectedCards;
+        return $result;
         
     } catch (Exception $e) {
         error_log("Error selecting random cards for player: " . $e->getMessage());

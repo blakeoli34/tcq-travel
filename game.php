@@ -160,6 +160,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             echo json_encode($result);
             exit;
 
+        case 'clear_daily_deck':
+            if ($gameMode !== 'digital') {
+                echo json_encode(['success' => false, 'message' => 'Not a digital game']);
+                exit;
+            }
+            
+            $result = clearDailyDeck($player['game_id'], $player['id']);
+            echo json_encode($result);
+            exit;
+
         case 'draw_to_slot':
             if ($gameMode !== 'digital') {
                 echo json_encode(['success' => false, 'message' => 'Not a digital game']);
