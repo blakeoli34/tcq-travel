@@ -337,19 +337,34 @@ function hasActiveStatusEffects($gameId, $playerId) {
 
 function getStatusEffectIcons($gameId, $playerId) {
     try {
-        $effects = hasActiveStatusEffects($gameId, $playerId);
+        $pdo = Config::getDatabaseConnection();
         $icons = [];
         
-        if ($effects['has_curse']) {
+        // Check for active curse effects
+        $stmt = $pdo->prepare("
+            SELECT COUNT(*) FROM active_curse_effects 
+            WHERE game_id = ? AND player_id = ? AND (expires_at IS NULL OR expires_at > NOW())
+        ");
+        $stmt->execute([$gameId, $playerId]);
+        $curseCount = $stmt->fetchColumn();
+        
+        if ($curseCount > 0) {
             $icons[] = ['type' => 'curse', 'icon' => '💀', 'color' => '#67597A'];
         }
         
-        if ($effects['has_power']) {
+        // Check for active power effects
+        $stmt = $pdo->prepare("
+            SELECT COUNT(*) FROM active_power_effects 
+            WHERE game_id = ? AND player_id = ? AND (expires_at IS NULL OR expires_at > NOW())
+        ");
+        $stmt->execute([$gameId, $playerId]);
+        $powerCount = $stmt->fetchColumn();
+        
+        if ($powerCount > 0) {
             $icons[] = ['type' => 'power', 'icon' => '⚡', 'color' => '#68B684'];
         }
         
         // Check for veto wait
-        $pdo = Config::getDatabaseConnection();
         $timezone = new DateTimeZone('America/Indiana/Indianapolis');
         $now = new DateTime('now', $timezone);
         

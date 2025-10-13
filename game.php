@@ -26,6 +26,19 @@ if (!$player) {
     exit;
 }
 
+// Check for testing mode parameter
+if (isset($_GET['testing']) && $_GET['testing'] === '1') {
+    $stmt = $pdo->prepare("UPDATE games SET testing_mode = 1 WHERE id = ?");
+    $stmt->execute([$player['game_id']]);
+    header('Location: game.php');
+    exit;
+}
+
+// Get testing mode status
+$stmt = $pdo->prepare("SELECT testing_mode FROM games WHERE id = ?");
+$stmt->execute([$player['game_id']]);
+$testingMode = (bool)$stmt->fetchColumn();
+
 // Get fresh game data to check current mode
 $pdo = Config::getDatabaseConnection();
 $stmt = $pdo->prepare("SELECT * FROM games WHERE id = ?");
@@ -635,6 +648,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             }
             exit;
 
+        case 'check_blocking_curses':
+            if ($gameMode !== 'digital') {
+                echo json_encode(['success' => false, 'message' => 'Not a digital game']);
+                exit;
+            }
+            
+            try {
+                $pdo = Config::getDatabaseConnection();
+                
+                $stmt = $pdo->prepare("
+                    SELECT c.card_name, c.complete_snap, c.complete_spicy
+                    FROM active_curse_effects ace
+                    JOIN cards c ON ace.card_id = c.id
+                    WHERE ace.game_id = ? AND ace.player_id = ?
+                    AND (c.complete_snap = 1 OR c.complete_spicy = 1)
+                    LIMIT 1
+                ");
+                $stmt->execute([$player['game_id'], $player['id']]);
+                $blockingCurse = $stmt->fetch();
+                
+                if ($blockingCurse) {
+                    $cardType = $blockingCurse['complete_snap'] ? 'snap' : 'spicy';
+                    echo json_encode([
+                        'success' => true,
+                        'is_blocked' => true,
+                        'curse_name' => $blockingCurse['card_name'],
+                        'card_type' => $cardType
+                    ]);
+                } else {
+                    echo json_encode([
+                        'success' => true,
+                        'is_blocked' => false
+                    ]);
+                }
+            } catch (Exception $e) {
+                echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+            }
+            exit;
+
         case 'cleanup_expired_effects':
             if ($gameMode !== 'digital') {
                 echo json_encode(['success' => false, 'message' => 'Not a digital game']);
@@ -959,6 +1011,111 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $result = cleanupIncorrectHandCards($player['game_id']);
             echo json_encode(['success' => $result]);
             exit;
+
+        case 'get_debug_info':
+            if ($gameMode !== 'digital') {
+                echo json_encode(['success' => false]);
+                exit;
+            }
+            
+            try {
+                $pdo = Config::getDatabaseConnection();
+                
+                // Get available cards
+                $available = getAvailableCardsForDeck($player['game_id'], $player['id']);
+                
+                // Get total cards in travel mode
+                $stmt = $pdo->prepare("SELECT travel_mode_id FROM games WHERE id = ?");
+                $stmt->execute([$player['game_id']]);
+                $modeId = $stmt->fetchColumn();
+                
+                $total = [];
+                foreach (['challenge', 'curse', 'power', 'battle'] as $category) {
+                    $stmt = $pdo->prepare("
+                        SELECT COUNT(DISTINCT c.id)
+                        FROM cards c
+                        JOIN card_travel_modes ctm ON c.id = ctm.card_id
+                        WHERE c.card_category = ? AND ctm.mode_id = ?
+                    ");
+                    $stmt->execute([$category, $modeId]);
+                    $total[$category] = $stmt->fetchColumn();
+                }
+                
+                echo json_encode([
+                    'success' => true,
+                    'available' => [
+                        'challenge' => $available['challenge_count'],
+                        'curse' => $available['curse_count'],
+                        'power' => $available['power_count']
+                    ],
+                    'total' => $total
+                ]);
+            } catch (Exception $e) {
+                echo json_encode(['success' => false]);
+            }
+            exit;
+
+        case 'end_game_day_debug':
+            if ($gameMode !== 'digital') {
+                echo json_encode(['success' => false, 'message' => 'Not a digital game']);
+                exit;
+            }
+            
+            // Check testing mode
+            $stmt = $pdo->prepare("SELECT testing_mode FROM games WHERE id = ?");
+            $stmt->execute([$player['game_id']]);
+            if (!$stmt->fetchColumn()) {
+                echo json_encode(['success' => false, 'message' => 'Testing mode not enabled']);
+                exit;
+            }
+            
+            try {
+                $pdo->beginTransaction();
+                
+                // Clear all daily deck slots
+                $timezone = new DateTimeZone('America/Indiana/Indianapolis');
+                $today = (new DateTime('now', $timezone))->format('Y-m-d');
+                
+                $stmt = $pdo->prepare("
+                    UPDATE daily_deck_slots 
+                    SET card_id = NULL, drawn_at = NULL, completed_at = NULL, 
+                        completed_by_player_id = NULL, curse_activated = FALSE
+                    WHERE game_id = ? AND deck_date = ?
+                ");
+                $stmt->execute([$player['game_id'], $today]);
+                
+                // Clear active curse effects
+                $stmt = $pdo->prepare("DELETE FROM active_curse_effects WHERE game_id = ?");
+                $stmt->execute([$player['game_id']]);
+                
+                // Delete old daily decks
+                $stmt = $pdo->prepare("DELETE FROM daily_decks WHERE game_id = ? AND deck_date = ?");
+                $stmt->execute([$player['game_id'], $today]);
+                
+                $pdo->commit();
+                
+                // Generate new deck with logging
+                ob_start();
+                $result = generateDailyDeckWithLogging($player['game_id'], $player['id']);
+                $log = ob_get_clean();
+                
+                if ($result['success']) {
+                    echo json_encode([
+                        'success' => true,
+                        'log' => $log
+                    ]);
+                } else {
+                    echo json_encode([
+                        'success' => false,
+                        'message' => $result['message']
+                    ]);
+                }
+                
+            } catch (Exception $e) {
+                $pdo->rollBack();
+                echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+            }
+            exit;
     }
 }
 ?>
@@ -1221,6 +1378,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     <div class="veto-countdown" id="vetoCountdown">0:00</div>
                 </div>
 
+                <div class="curse-block-overlay" id="curseBlockOverlay" style="display: none;">
+                    <div class="curse-block-message" id="curseBlockMessage">Curse Active</div>
+                    <div class="curse-block-requirement" id="curseBlockRequirement">Complete a snap card to clear this curse</div>
+                </div>
+
                 <div class="daily-deck-count" id="dailyDeckCount" style="display: none;">
                     <span id="deckCountText">Cards remaining: 0</span>
                 </div>
@@ -1393,14 +1555,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             <!-- Pass game data to JavaScript -->
             <script>
                 window.gameDataFromPHP = {
-                    currentPlayerId: <?= $currentPlayer['id'] ?>,
-                    opponentPlayerId: <?= $opponentPlayer['id'] ?>,
-                    gameStatus: '<?= $gameStatus ?>',
-                    startDate: '<?= $gameData['start_date'] ?>',
-                    currentPlayerGender: '<?= $currentPlayer['gender'] ?>',
-                    opponentPlayerGender: '<?= $opponentPlayer['gender'] ?>',
-                    opponentPlayerName: '<?= htmlspecialchars($opponentPlayer['first_name']) ?>'
-                };
+                currentPlayerId: <?= $currentPlayer['id'] ?>,
+                opponentPlayerId: <?= $opponentPlayer['id'] ?>,
+                gameStatus: '<?= $gameStatus ?>',
+                startDate: '<?= $gameData['start_date'] ?>',
+                currentPlayerGender: '<?= $currentPlayer['gender'] ?>',
+                opponentPlayerGender: '<?= $opponentPlayer['gender'] ?>',
+                opponentPlayerName: '<?= htmlspecialchars($opponentPlayer['first_name']) ?>',
+                testingMode: <?= $testingMode ? 'true' : 'false' ?>
+            };
             </script>
         <?php endif; ?>
     </div>
@@ -1548,6 +1711,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             </div>
         </div>
     </div>
+
+    <?php if ($testingMode): ?>
+    <div class="debug-toggle" onclick="toggleDebugPanel()">DEBUG</div>
+    <div class="debug-panel" id="debugPanel">
+        <div class="debug-section">
+            <h3>Testing Mode Active</h3>
+            <p style="color: #ff0;">All time restrictions removed. Wait periods set to 5min.</p>
+        </div>
+        
+        <div class="debug-section">
+            <h3>Master Deck Status</h3>
+            <div id="debugDeckCounts">Loading...</div>
+        </div>
+        
+        <div class="debug-section">
+            <h3>Actions</h3>
+            <button class="debug-btn" onclick="endGameDay()">End Current Day</button>
+        </div>
+        
+        <div class="debug-section">
+            <h3>Last Generation Log</h3>
+            <div class="debug-log" id="debugLog">No log available</div>
+        </div>
+    </div>
+    <?php endif; ?>
     
     <script src="https://www.gstatic.com/firebasejs/9.0.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.0.0/firebase-messaging-compat.js"></script>

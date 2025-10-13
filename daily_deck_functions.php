@@ -10,7 +10,13 @@ function generateDailyDeck($gameId, $playerId) {
         // Check downtime - prevent generation between midnight and 8am
         $now = new DateTime('now', $timezone);
         $hours = (int)$now->format('H');
-        if ($hours >= 0 && $hours < 8) {
+
+        // Skip downtime check if testing mode
+        $stmt = $pdo->prepare("SELECT testing_mode FROM games WHERE id = ?");
+        $stmt->execute([$gameId]);
+        $testingMode = (bool)$stmt->fetchColumn();
+
+        if (!$testingMode && $hours >= 0 && $hours < 8) {
             return ['success' => false, 'message' => 'Cannot generate deck during downtime'];
         }
         
@@ -44,16 +50,23 @@ function generateDailyDeck($gameId, $playerId) {
 
             $pdo->beginTransaction();
             
-            // Calculate cards needed for today's deck
-            $cardsPerDay = calculateCardsPerDay($gameId, $playerId, $daysRemaining);
+            // Get available cards (excluding used/completed cards)
+            $availableCards = getAvailableCardsForDeck($gameId, $playerId);
             
-            // Get used cards for this specific player
-            $usedCardIds = getUsedCardIds($gameId, $playerId);
+            // Calculate cards per day (round down)
+            $challengePerDay = floor($availableCards['challenge_count'] / $daysRemaining);
+            $cursePerDay = floor($availableCards['curse_count'] / $daysRemaining);
+            $powerPerDay = floor($availableCards['power_count'] / $daysRemaining);
             
-            // Select cards for this player - pass playerId to avoid conflicts
-            $challengeCards = selectRandomCardsForPlayer($gameId, $playerId, 'challenge', $cardsPerDay['challenge'], $usedCardIds);
-            $curseCards = selectRandomCardsForPlayer($gameId, $playerId, 'curse', $cardsPerDay['curse'], $usedCardIds);
-            $powerCards = selectRandomCardsForPlayer($gameId, $playerId, 'power', $cardsPerDay['power'], $usedCardIds);
+            // Ensure at least 1 of each if available
+            $challengePerDay = max(1, $challengePerDay);
+            $cursePerDay = max(1, $cursePerDay);
+            $powerPerDay = max(1, $powerPerDay);
+            
+            // Select cards for this player
+            $challengeCards = selectRandomCardsForPlayer($gameId, $playerId, 'challenge', $challengePerDay, $availableCards['used_card_ids']);
+            $curseCards = selectRandomCardsForPlayer($gameId, $playerId, 'curse', $cursePerDay, $availableCards['used_card_ids']);
+            $powerCards = selectRandomCardsForPlayer($gameId, $playerId, 'power', $powerPerDay, $availableCards['used_card_ids']);
 
             // Select ONE battle card for the entire game today
             $stmt = $pdo->prepare("
@@ -65,7 +78,7 @@ function generateDailyDeck($gameId, $playerId) {
 
             if (!$battleCardId) {
                 // No battle card selected yet, choose one for today
-                $battleCards = selectRandomCardsForPlayer($gameId, $playerId, 'battle', 1, $usedCardIds);
+                $battleCards = selectRandomCardsForPlayer($gameId, $playerId, 'battle', 1, []);
                 if (!empty($battleCards)) {
                     $battleCardId = $battleCards[0]['id'];
                     
@@ -76,7 +89,6 @@ function generateDailyDeck($gameId, $playerId) {
                     ");
                     $stmt->execute([$gameId, $today, $battleCardId]);
                 }
-                $battleCards = selectRandomCardsForPlayer($gameId, $playerId, 'battle', 1, $usedCardIds);
             } else {
                 // Use the existing battle card
                 $stmt = $pdo->prepare("SELECT * FROM cards WHERE id = ?");
@@ -124,6 +136,141 @@ function generateDailyDeck($gameId, $playerId) {
         }
         error_log("Error generating daily deck: " . $e->getMessage());
         return ['success' => false, 'message' => 'Failed to generate daily deck'];
+    }
+}
+
+function generateDailyDeckWithLogging($gameId, $playerId) {
+    error_log("=== DAILY DECK GENERATION START ===");
+    error_log("Game ID: $gameId, Player ID: $playerId");
+    
+    $available = getAvailableCardsForDeck($gameId, $playerId);
+    
+    error_log("Available cards:");
+    error_log("  Challenge: {$available['challenge_count']}");
+    error_log("  Curse: {$available['curse_count']}");
+    error_log("  Power: {$available['power_count']}");
+    error_log("  Excluded card IDs: " . implode(', ', $available['used_card_ids']));
+    
+    $pdo = Config::getDatabaseConnection();
+    $timezone = new DateTimeZone('America/Indiana/Indianapolis');
+    
+    $stmt = $pdo->prepare("SELECT end_date FROM games WHERE id = ?");
+    $stmt->execute([$gameId]);
+    $endDate = new DateTime($stmt->fetchColumn(), $timezone);
+    $daysRemaining = (new DateTime('now', $timezone))->diff($endDate)->days + 1;
+    
+    error_log("Days remaining: $daysRemaining");
+    
+    $challengePerDay = floor($available['challenge_count'] / $daysRemaining);
+    $cursePerDay = floor($available['curse_count'] / $daysRemaining);
+    $powerPerDay = floor($available['power_count'] / $daysRemaining);
+    
+    error_log("Cards per day (rounded down):");
+    error_log("  Challenge: $challengePerDay");
+    error_log("  Curse: $cursePerDay");
+    error_log("  Power: $powerPerDay");
+    
+    $result = generateDailyDeck($gameId, $playerId);
+    
+    error_log("Generation result: " . ($result['success'] ? 'SUCCESS' : 'FAILED'));
+    if ($result['success']) {
+        error_log("Total cards generated: {$result['cards_generated']}");
+    }
+    error_log("=== DAILY DECK GENERATION END ===");
+    
+    return $result;
+}
+
+function getAvailableCardsForDeck($gameId, $playerId) {
+    try {
+        $pdo = Config::getDatabaseConnection();
+        $timezone = new DateTimeZone('America/Indiana/Indianapolis');
+        $today = (new DateTime('now', $timezone))->format('Y-m-d');
+        
+        // Get all card IDs that should be excluded (actually used/completed)
+        $usedCardIds = [];
+        
+        // 1. Cards that were completed from daily deck slots (challenges/battles)
+        $stmt = $pdo->prepare("
+            SELECT DISTINCT dds.card_id
+            FROM daily_deck_slots dds
+            WHERE dds.game_id = ? AND dds.player_id = ? 
+            AND dds.completed_at IS NOT NULL
+            AND dds.card_id IS NOT NULL
+        ");
+        $stmt->execute([$gameId, $playerId]);
+        $usedCardIds = array_merge($usedCardIds, $stmt->fetchAll(PDO::FETCH_COLUMN));
+        
+        // 2. Curse cards that were activated (marked as used when activated)
+        $stmt = $pdo->prepare("
+            SELECT DISTINCT dds.card_id
+            FROM daily_deck_slots dds
+            JOIN cards c ON dds.card_id = c.id
+            WHERE dds.game_id = ? AND dds.player_id = ? 
+            AND c.card_category = 'curse'
+            AND dds.curse_activated = TRUE
+            AND dds.card_id IS NOT NULL
+        ");
+        $stmt->execute([$gameId, $playerId]);
+        $usedCardIds = array_merge($usedCardIds, $stmt->fetchAll(PDO::FETCH_COLUMN));
+        
+        // 3. Power cards currently in player's hand
+        $stmt = $pdo->prepare("
+            SELECT DISTINCT card_id
+            FROM player_cards
+            WHERE game_id = ? AND player_id = ? AND card_type = 'power'
+        ");
+        $stmt->execute([$gameId, $playerId]);
+        $usedCardIds = array_merge($usedCardIds, $stmt->fetchAll(PDO::FETCH_COLUMN));
+        
+        // 4. Challenge cards currently in player's hand (stored challenges)
+        $stmt = $pdo->prepare("
+            SELECT DISTINCT card_id
+            FROM player_cards
+            WHERE game_id = ? AND player_id = ? AND card_type = 'challenge'
+        ");
+        $stmt->execute([$gameId, $playerId]);
+        $usedCardIds = array_merge($usedCardIds, $stmt->fetchAll(PDO::FETCH_COLUMN));
+        
+        // Remove duplicates
+        $usedCardIds = array_unique($usedCardIds);
+        
+        // Get counts of available cards by category
+        $excludeClause = "";
+        if (!empty($usedCardIds)) {
+            $placeholders = str_repeat('?,', count($usedCardIds) - 1) . '?';
+            $excludeClause = "AND c.id NOT IN ($placeholders)";
+        }
+        
+        $counts = [];
+        foreach (['challenge', 'curse', 'power'] as $category) {
+            $sql = "
+                SELECT COUNT(DISTINCT c.id)
+                FROM cards c
+                JOIN card_travel_modes ctm ON c.id = ctm.card_id
+                JOIN games g ON g.travel_mode_id = ctm.mode_id
+                WHERE c.card_category = ? AND g.id = ? $excludeClause
+            ";
+            
+            $params = array_merge([$category, $gameId], $usedCardIds);
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute($params);
+            
+            $counts[$category . '_count'] = $stmt->fetchColumn();
+        }
+        
+        $counts['used_card_ids'] = $usedCardIds;
+        
+        return $counts;
+        
+    } catch (Exception $e) {
+        error_log("Error getting available cards: " . $e->getMessage());
+        return [
+            'challenge_count' => 0,
+            'curse_count' => 0,
+            'power_count' => 0,
+            'used_card_ids' => []
+        ];
     }
 }
 
@@ -474,6 +621,17 @@ function isPlayerWaitingVeto($gameId, $playerId) {
 function applyVetoWait($gameId, $playerId, $minutes) {
     try {
         $pdo = Config::getDatabaseConnection();
+        
+        // Check testing mode
+        $stmt = $pdo->prepare("SELECT testing_mode FROM games WHERE id = ?");
+        $stmt->execute([$gameId]);
+        $testingMode = (bool)$stmt->fetchColumn();
+        
+        // Override to 5 minutes in testing mode
+        if ($testingMode) {
+            $minutes = 5;
+        }
+        
         $timezone = new DateTimeZone('America/Indiana/Indianapolis');
         $waitUntil = new DateTime('now', $timezone);
         $waitUntil->add(new DateInterval('PT' . $minutes . 'M'));
@@ -485,7 +643,6 @@ function applyVetoWait($gameId, $playerId, $minutes) {
         ");
         $stmt->execute([$waitUntil->format('Y-m-d H:i:s'), $gameId, $playerId]);
         
-        // Debug logging
         error_log("Applied veto wait for player {$playerId}: until " . $waitUntil->format('Y-m-d H:i:s'));
         
         return true;
@@ -516,20 +673,38 @@ function clearExpiredDailyDecks($gameId) {
         $timezone = new DateTimeZone('America/Indiana/Indianapolis');
         $today = (new DateTime('now', $timezone))->format('Y-m-d');
         
-        // Clear slots from previous days
-        $stmt = $pdo->prepare("
-            UPDATE daily_deck_slots 
-            SET card_id = NULL, drawn_at = NULL, completed_at = NULL, completed_by_player_id = NULL
-            WHERE game_id = ? AND deck_date < ?
-        ");
-        $stmt->execute([$gameId, $today]);
+        $pdo->beginTransaction();
         
-        // Keep deck records for tracking used cards, but they won't affect daily deck size
-        // The used cards are tracked permanently to prevent reuse
+        // Get all players in this game
+        $stmt = $pdo->prepare("SELECT id FROM players WHERE game_id = ?");
+        $stmt->execute([$gameId]);
+        $playerIds = $stmt->fetchAll(PDO::FETCH_COLUMN);
         
+        foreach ($playerIds as $playerId) {
+            // Clear active curse effects from previous day
+            $stmt = $pdo->prepare("
+                DELETE FROM active_curse_effects 
+                WHERE game_id = ? AND player_id = ?
+            ");
+            $stmt->execute([$gameId, $playerId]);
+            
+            // Clear slots from previous days
+            $stmt = $pdo->prepare("
+                UPDATE daily_deck_slots 
+                SET card_id = NULL, drawn_at = NULL, completed_at = NULL, 
+                    completed_by_player_id = NULL, curse_activated = FALSE
+                WHERE game_id = ? AND player_id = ? AND deck_date < ?
+            ");
+            $stmt->execute([$gameId, $playerId, $today]);
+        }
+        
+        $pdo->commit();
         return true;
         
     } catch (Exception $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
         error_log("Error clearing expired daily decks: " . $e->getMessage());
         return false;
     }

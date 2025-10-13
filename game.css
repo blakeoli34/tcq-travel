@@ -510,6 +510,38 @@ body.beach::after {
     text-shadow: 0 0 10px rgba(0,0,0,0.2);
 }
 
+.curse-block-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(103, 89, 122, 0.95);
+    z-index: 10;
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    border-radius: 20px;
+}
+
+.curse-block-message {
+    color: white;
+    font-size: 20px;
+    font-weight: 700;
+    margin-bottom: 15px;
+    text-align: center;
+    padding: 0 20px;
+}
+
+.curse-block-requirement {
+    color: #fff;
+    font-size: 16px;
+    font-weight: 400;
+    text-align: center;
+    padding: 0 20px;
+}
+
 .daily-slots {
     display: flex;
     flex-direction: column;
@@ -1894,4 +1926,95 @@ body.beach::after {
     .dice-roller-section {
         border-color: #444;
     }
+}
+
+/* Debug Panel */
+.debug-panel {
+    position: fixed;
+    top: 0;
+    right: -400px;
+    width: 400px;
+    max-width: 90vw;
+    height: 100vh;
+    background: rgba(0, 0, 0, 0.95);
+    color: #fff;
+    z-index: 5000;
+    transition: right 0.3s ease;
+    overflow-y: auto;
+    padding: 20px;
+    font-size: 12px;
+    font-family: 'Courier New', monospace;
+}
+
+.debug-panel.open {
+    right: 0;
+}
+
+.debug-toggle {
+    position: fixed;
+    top: 50%;
+    right: 0;
+    transform: translateY(-50%);
+    background: rgba(0, 0, 0, 0.9);
+    color: #0f0;
+    padding: 15px 8px;
+    cursor: pointer;
+    z-index: 5001;
+    border-radius: 8px 0 0 8px;
+    font-weight: 700;
+    font-size: 14px;
+    writing-mode: vertical-rl;
+}
+
+.debug-section {
+    margin-bottom: 20px;
+    padding-bottom: 15px;
+    border-bottom: 1px solid #333;
+}
+
+.debug-section h3 {
+    color: #0f0;
+    margin-bottom: 10px;
+    font-size: 14px;
+}
+
+.debug-row {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 5px;
+}
+
+.debug-label {
+    color: #888;
+}
+
+.debug-value {
+    color: #0f0;
+    font-weight: 700;
+}
+
+.debug-btn {
+    width: 100%;
+    padding: 12px;
+    background: #0f0;
+    color: #000;
+    border: none;
+    border-radius: 5px;
+    font-weight: 700;
+    cursor: pointer;
+    margin-top: 10px;
+}
+
+.debug-btn:hover {
+    background: #0c0;
+}
+
+.debug-log {
+    background: #111;
+    padding: 10px;
+    border-radius: 5px;
+    max-height: 200px;
+    overflow-y: auto;
+    font-size: 10px;
+    white-space: pre-wrap;
 }

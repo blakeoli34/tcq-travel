@@ -81,6 +81,7 @@ $(document).ready(function() {
             updateSlotActionsForModifiers();
         }
         checkVetoWait();
+        checkCurseBlock();
         updateStatusEffects();
         refreshGameData();
         updateCurseTimers();
@@ -181,6 +182,12 @@ function loadDailyDeck() {
 }
 
 function checkDowntime() {
+    // Skip if testing mode
+    if (gameData.testingMode) {
+        hideDowntimeOverlay();
+        return false;
+    }
+    
     // Get current time in Indianapolis timezone
     const indianaTime = new Date().toLocaleString("en-US", {timeZone: "America/Indiana/Indianapolis"});
     const now = new Date(indianaTime);
@@ -677,31 +684,42 @@ function updateSlotActionsForModifiers() {
             const hasSkipPower = data.modifiers.some(m => m.skip_challenge);
             const hasBypassPower = data.modifiers.some(m => m.bypass_expiration);
             
-            document.querySelectorAll('.daily-slot .card-content').forEach(cardEl => {
-                const challengeIcon = cardEl.querySelector('.card-type-icon.challenge');
+            document.querySelectorAll('.daily-slot').forEach(slotEl => {
+                const cardContent = slotEl.querySelector('.card-content');
+                if (!cardContent) return;
+                
+                const challengeIcon = cardContent.querySelector('.card-type-icon.challenge');
                 if (challengeIcon) {
-                    const actions = cardEl.querySelector('.slot-actions');
+                    const actions = cardContent.querySelector('.slot-actions');
                     if (actions) {
+                        // Remove old power buttons first
+                        const oldSkip = actions.querySelector('.skip-btn');
+                        const oldStore = actions.querySelector('.store-btn');
+                        if (oldSkip) oldSkip.remove();
+                        if (oldStore) oldStore.remove();
+                        
+                        const slotNumber = parseInt(slotEl.dataset.slot);
+                        
                         // Add skip button
-                        if (hasSkipPower && !actions.querySelector('.skip-btn')) {
+                        if (hasSkipPower) {
                             const skipBtn = document.createElement('button');
-                            skipBtn.className = 'slot-action-btn btn-warning skip-btn';
+                            skipBtn.className = 'slot-action-btn skip-btn';
                             skipBtn.textContent = 'Skip';
-                            skipBtn.onclick = () => {
-                                const slot = cardEl.closest('.daily-slot');
-                                skipChallenge(parseInt(slot.dataset.slot));
+                            skipBtn.onclick = (e) => {
+                                e.stopPropagation();
+                                skipChallenge(slotNumber);
                             };
                             actions.appendChild(skipBtn);
                         }
                         
                         // Add store button
-                        if (hasBypassPower && !actions.querySelector('.store-btn')) {
+                        if (hasBypassPower) {
                             const storeBtn = document.createElement('button');
                             storeBtn.className = 'slot-action-btn btn-secondary store-btn';
                             storeBtn.textContent = 'Store';
-                            storeBtn.onclick = () => {
-                                const slot = cardEl.closest('.daily-slot');
-                                storeChallenge(parseInt(slot.dataset.slot));
+                            storeBtn.onclick = (e) => {
+                                e.stopPropagation();
+                                storeChallenge(slotNumber);
                             };
                             actions.appendChild(storeBtn);
                         }
@@ -1485,10 +1503,18 @@ function checkVetoWait() {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            if (data.is_waiting && !isVetoWaiting) {
-                startVetoWaitDisplay(data.wait_until);
-            } else if (!data.is_waiting && isVetoWaiting) {
-                endVetoWaitDisplay();
+            if (data.is_waiting) {
+                if (!isVetoWaiting) {
+                    startVetoWaitDisplay(data.wait_until);
+                }
+                // Update the countdown even if already displaying
+                if (data.wait_until && vetoWaitEndTime) {
+                    updateVetoWaitCountdown();
+                }
+            } else {
+                if (isVetoWaiting) {
+                    endVetoWaitDisplay();
+                }
             }
         }
     });
@@ -1518,20 +1544,21 @@ function startVetoWaitDisplay(waitUntil) {
 
 function updateVetoWaitCountdown() {
     const countdown = document.getElementById('vetoCountdown');
-    if (!countdown || !vetoWaitEndTime) return;
+    if (!countdown || !vetoWaitEndTime) return true;
     
     const now = new Date();
     const diff = vetoWaitEndTime - now;
     
     if (diff <= 0) {
         endVetoWaitDisplay();
-        return;
+        return false;
     }
     
     const minutes = Math.floor(diff / (1000 * 60));
     const seconds = Math.floor((diff % (1000 * 60)) / 1000);
     
     countdown.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+    return true;
 }
 
 function endVetoWaitDisplay() {
@@ -1544,6 +1571,47 @@ function endVetoWaitDisplay() {
     if (overlay) {
         overlay.style.display = 'none';
     }
+}
+
+function checkCurseBlock() {
+    fetch('game.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'action=check_blocking_curses'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success && data.is_blocked) {
+            showCurseBlockOverlay(data.curse_name, data.card_type);
+        } else {
+            hideCurseBlockOverlay();
+        }
+    });
+}
+
+function showCurseBlockOverlay(curseName, cardType) {
+    const overlay = document.getElementById('curseBlockOverlay');
+    const message = document.getElementById('curseBlockMessage');
+    const requirement = document.getElementById('curseBlockRequirement');
+    
+    if (overlay && message && requirement) {
+        message.textContent = curseName;
+        requirement.textContent = `Complete a ${cardType} card to clear this curse`;
+        overlay.style.display = 'flex';
+        
+        const container = document.querySelector('.daily-deck-container');
+        if (container) container.classList.add('wait');
+    }
+}
+
+function hideCurseBlockOverlay() {
+    const overlay = document.getElementById('curseBlockOverlay');
+    if (overlay) {
+        overlay.style.display = 'none';
+    }
+    
+    const container = document.querySelector('.daily-deck-container');
+    if (container) container.classList.remove('wait');
 }
 
 // ========================================
@@ -2995,6 +3063,90 @@ function setupSexyDice() {
     
     initializeDicePosition();
 }
+
+function toggleDebugPanel() {
+    const panel = document.getElementById('debugPanel');
+    if (panel) {
+        panel.classList.toggle('open');
+        if (panel.classList.contains('open')) {
+            updateDebugPanel();
+        }
+    }
+}
+
+function updateDebugPanel() {
+    fetch('game.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'action=get_debug_info'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            const countsDiv = document.getElementById('debugDeckCounts');
+            if (countsDiv) {
+                countsDiv.innerHTML = `
+                    <div class="debug-row">
+                        <span class="debug-label">Challenge Cards:</span>
+                        <span class="debug-value">${data.available.challenge} / ${data.total.challenge}</span>
+                    </div>
+                    <div class="debug-row">
+                        <span class="debug-label">Curse Cards:</span>
+                        <span class="debug-value">${data.available.curse} / ${data.total.curse}</span>
+                    </div>
+                    <div class="debug-row">
+                        <span class="debug-label">Power Cards:</span>
+                        <span class="debug-value">${data.available.power} / ${data.total.power}</span>
+                    </div>
+                    <div class="debug-row">
+                        <span class="debug-label">Battle Cards:</span>
+                        <span class="debug-value">${data.total.battle}</span>
+                    </div>
+                `;
+            }
+        }
+    });
+}
+
+function endGameDay() {
+    if (!confirm('End current game day and generate next day\'s deck?')) {
+        return;
+    }
+    
+    fetch('game.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'action=end_game_day_debug'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showInAppNotification('Day Ended', 'New daily deck generated');
+            if (data.log) {
+                const logDiv = document.getElementById('debugLog');
+                if (logDiv) {
+                    logDiv.textContent = data.log;
+                }
+            }
+            loadDailyDeck();
+            updateDebugPanel();
+        } else {
+            alert('Failed to end day: ' + (data.message || 'Unknown error'));
+        }
+    });
+}
+
+// Update debug panel every 10 seconds if open
+setInterval(() => {
+    const panel = document.getElementById('debugPanel');
+    if (panel && panel.classList.contains('open')) {
+        updateDebugPanel();
+    }
+}, 10000);
+
+// Make functions global
+window.toggleDebugPanel = toggleDebugPanel;
+window.endGameDay = endGameDay;
 
 // ========================================
 // MAKE FUNCTIONS GLOBALLY AVAILABLE

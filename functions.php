@@ -278,6 +278,16 @@ function createTimer($gameId, $playerId, $description, $durationMinutes) {
     try {
         $pdo = Config::getDatabaseConnection();
         
+        // Check testing mode
+        $stmt = $pdo->prepare("SELECT testing_mode FROM games WHERE id = ?");
+        $stmt->execute([$gameId]);
+        $testingMode = (bool)$stmt->fetchColumn();
+        
+        // Override to 5 minutes in testing mode for curse waits
+        if ($testingMode && strpos($description, 'curse') !== false) {
+            $durationMinutes = 5;
+        }
+        
         $startTime = new DateTime('now', new DateTimeZone('UTC'));
         $endTime = clone $startTime;
         $seconds = $durationMinutes * 60;
@@ -302,17 +312,13 @@ function createTimer($gameId, $playerId, $description, $durationMinutes) {
         $endTimeLocal = clone $endTime;
         $endTimeLocal->setTimezone(new DateTimeZone('America/Indiana/Indianapolis'));
 
-        // Format for at command (without seconds, we'll add sleep for precision)
         $atTime = $endTimeLocal->format('H:i M j, Y');
         $seconds = $endTimeLocal->format('s');
 
-        // Create command that sleeps to the exact second, then executes
         $atCommand = "sleep {$seconds} && /usr/bin/php /var/www/thecouplesquest/cron.php timer_{$timerId}";
 
-        // Schedule the job with at
         $atJob = shell_exec("echo '{$atCommand}' | at {$atTime} 2>&1");
 
-        // Log the at job creation for debugging
         error_log("Created at job for timer {$timerId}: {$atTime} +{$seconds}s - Result: {$atJob}");
 
         return ['success' => true, 'timer_id' => $timerId];
