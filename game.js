@@ -61,7 +61,10 @@ $(document).ready(function() {
     
     setTimeout(() => {
         if (!checkDowntime()) {
-            loadDailyDeck();
+            // Only load daily deck if game is active
+            if (gameData && gameData.gameStatus === 'active') {
+                loadDailyDeck();
+            }
         }
         checkVetoWait();
         updateStatusEffects();
@@ -69,6 +72,7 @@ $(document).ready(function() {
             loadHandCards();
             updateDeckCounts();
             updateDailyDeckCount();
+            checkDeckEmpty();
         }
         setScorebugWidth();
         $('.score-bug, .game-timer, .hand-indicator').addClass('visible');
@@ -87,6 +91,7 @@ $(document).ready(function() {
         updateCurseTimers();
         updateCardModifiers();
         checkForDeckPeek();
+        checkDeckEmpty();
         updateDailyDeckCount();
         // Cleanup orphaned curse slots
         fetch('game.php', {
@@ -154,6 +159,11 @@ $(document).ready(function() {
 let currentDeckState = null;
 
 function loadDailyDeck() {
+    // Don't load daily deck if game isn't active
+    if (!gameData || gameData.gameStatus !== 'active') {
+        return;
+    }
+    
     fetch('game.php', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -167,12 +177,15 @@ function loadDailyDeck() {
             if (currentDeckState !== newDeckState) {
                 currentDeckState = newDeckState;
                 dailyDeckData = data;
+                dailyDeckData.remainingCards = data.remaining_cards || 0;
                 updateDailyDeckDisplay(data.slots);
                 updateDeckMessage(data.slots);
             }
         } else {
-            // No deck for today - generate one
-            generateDailyDeck();
+            // Only try to generate if game is active
+            if (gameData.gameStatus === 'active') {
+                generateDailyDeck();
+            }
         }
         updateDailyDeckCount();
     })
@@ -185,6 +198,7 @@ function checkDowntime() {
     // Skip if testing mode
     if (gameData.testingMode) {
         hideDowntimeOverlay();
+        showGameClock();
         return false;
     }
     
@@ -199,18 +213,34 @@ function checkDowntime() {
         nextAvailable.setHours(8, 0, 0, 0);
         
         showDowntimeOverlay(nextAvailable);
+        hideGameClock();
         return true;
     }
     
     hideDowntimeOverlay();
+    showGameClock();
     return false;
 }
 
+function hideGameClock() {
+    $('#dailyGameClock').addClass('downtime');
+}
+
+function showGameClock() {
+    $('#dailyGameClock').removeClass('downtime');
+}
+
 function showDowntimeOverlay(nextAvailable) {
+    hideDeckEmptyOverlay();
     const container = document.querySelector('.daily-deck-container');
     if (!container) return;
     
     container.classList.add('downtime');
+    
+    // Get day of week
+    const indianaTime = new Date().toLocaleString("en-US", {timeZone: "America/Indiana/Indianapolis"});
+    const now = new Date(indianaTime);
+    const dayName = now.toLocaleDateString('en-US', { weekday: 'long' });
     
     let overlay = document.getElementById('downtimeOverlay');
     if (!overlay) {
@@ -218,7 +248,7 @@ function showDowntimeOverlay(nextAvailable) {
         overlay.id = 'downtimeOverlay';
         overlay.className = 'downtime-overlay';
         overlay.innerHTML = `
-            <div class="downtime-message">Daily Deck Unavailable</div>
+            <div class="downtime-message">${dayName} Daily Deck Generates&nbsp;in</div>
             <div class="downtime-countdown" id="downtimeCountdown">0:00:00</div>
         `;
         container.appendChild(overlay);
@@ -553,7 +583,10 @@ function updateDeckMessage(slots) {
     if (!overlay) return;
     
     const emptySlots = slots.filter(slot => !slot.card_id).length;
-    overlay.style.display = emptySlots === 3 ? 'flex' : 'none';
+    const hasRemainingCards = dailyDeckData.remainingCards > 0;
+    
+    // Only show if all slots are empty AND there are cards to draw
+    overlay.style.display = (emptySlots === 3 && hasRemainingCards) ? 'flex' : 'none';
 }
 
 function drawAllSlots() {
@@ -1504,15 +1537,23 @@ function checkVetoWait() {
     .then(data => {
         if (data.success) {
             if (data.is_waiting) {
+                // Update end time if it changed
+                if (data.wait_until) {
+                    const newEndTime = new Date(data.wait_until);
+                    if (!vetoWaitEndTime || newEndTime.getTime() !== vetoWaitEndTime.getTime()) {
+                        vetoWaitEndTime = newEndTime;
+                        console.log('Updated veto wait end time:', vetoWaitEndTime);
+                    }
+                }
+                
                 if (!isVetoWaiting) {
+                    console.log('Starting veto wait display');
                     startVetoWaitDisplay(data.wait_until);
                 }
-                // Update the countdown even if already displaying
-                if (data.wait_until && vetoWaitEndTime) {
-                    updateVetoWaitCountdown();
-                }
+                updateVetoWaitCountdown();
             } else {
                 if (isVetoWaiting) {
+                    console.log('Ending veto wait display');
                     endVetoWaitDisplay();
                 }
             }
@@ -1521,11 +1562,14 @@ function checkVetoWait() {
 }
 
 function startVetoWaitDisplay(waitUntil) {
+    console.log('Starting veto wait display');
     isVetoWaiting = true;
     
     vetoWaitEndTime = new Date(waitUntil);
+    console.log('Veto wait end time:', vetoWaitEndTime);
 
     $('.daily-deck-container').addClass('wait');
+    console.log('Added wait class to daily-deck-container');
     
     const overlay = document.getElementById('vetoWaitOverlay');
     if (overlay) {
@@ -1534,6 +1578,7 @@ function startVetoWaitDisplay(waitUntil) {
         
         const countdownInterval = setInterval(() => {
             if (!isVetoWaiting) {
+                console.log('Clearing countdown interval - veto wait ended');
                 clearInterval(countdownInterval);
                 return;
             }
@@ -1562,15 +1607,68 @@ function updateVetoWaitCountdown() {
 }
 
 function endVetoWaitDisplay() {
+    console.log('Ending veto wait display - isVetoWaiting was:', isVetoWaiting);
+    console.trace(); // This will show the call stack
+    
     isVetoWaiting = false;
     vetoWaitEndTime = null;
 
     $('.daily-deck-container').removeClass('wait');
+    console.log('Removed wait class from daily-deck-container');
     
     const overlay = document.getElementById('vetoWaitOverlay');
     if (overlay) {
         overlay.style.display = 'none';
     }
+}
+
+function checkDeckEmpty() {
+    if (!gameData || gameData.gameStatus !== 'active') return;
+    
+    // Don't show deck empty during downtime
+    if (checkDowntime()) return;
+    
+    fetch('game.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'action=check_deck_empty'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success && data.is_empty) {
+            showDeckEmptyOverlay();
+        } else {
+            hideDeckEmptyOverlay();
+        }
+    });
+}
+
+function showDeckEmptyOverlay() {
+    const container = document.querySelector('.daily-deck-container');
+    if (!container) return;
+    
+    container.classList.add('deck-empty');
+    
+    let overlay = document.getElementById('deckEmptyOverlay');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'deckEmptyOverlay';
+        overlay.className = 'deck-empty-overlay';
+        overlay.innerHTML = `
+            <div class="deck-empty-message">Daily Deck Complete</div>
+            <div class="deck-empty-subtitle">Check back tomorrow for new cards</div>
+        `;
+        container.appendChild(overlay);
+    }
+    overlay.style.display = 'flex';
+}
+
+function hideDeckEmptyOverlay() {
+    const container = document.querySelector('.daily-deck-container');
+    const overlay = document.getElementById('deckEmptyOverlay');
+    
+    if (container) container.classList.remove('deck-empty');
+    if (overlay) overlay.style.display = 'none';
 }
 
 function checkCurseBlock() {
@@ -1610,8 +1708,11 @@ function hideCurseBlockOverlay() {
         overlay.style.display = 'none';
     }
     
-    const container = document.querySelector('.daily-deck-container');
-    if (container) container.classList.remove('wait');
+    // Only remove wait class if not in veto wait
+    if (!isVetoWaiting) {
+        const container = document.querySelector('.daily-deck-container');
+        if (container) container.classList.remove('wait');
+    }
 }
 
 // ========================================
@@ -1619,6 +1720,10 @@ function hideCurseBlockOverlay() {
 // ========================================
 
 function updateStatusEffects() {
+    // Only update status effects if game is active
+    if (!gameData || gameData.gameStatus !== 'active') {
+        return;
+    }
     
     fetch('game.php', {
         method: 'POST',

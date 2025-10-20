@@ -26,9 +26,18 @@ if (!$player) {
     exit;
 }
 
+$pdo = Config::getDatabaseConnection();
+
 // Check for testing mode parameter
 if (isset($_GET['testing']) && $_GET['testing'] === '1') {
     $stmt = $pdo->prepare("UPDATE games SET testing_mode = 1 WHERE id = ?");
+    $stmt->execute([$player['game_id']]);
+    header('Location: game.php');
+    exit;
+}
+
+if (isset($_GET['testing']) && $_GET['testing'] === 'false') {
+    $stmt = $pdo->prepare("UPDATE games SET testing_mode = 0 WHERE id = ?");
     $stmt->execute([$player['game_id']]);
     header('Location: game.php');
     exit;
@@ -40,7 +49,6 @@ $stmt->execute([$player['game_id']]);
 $testingMode = (bool)$stmt->fetchColumn();
 
 // Get fresh game data to check current mode
-$pdo = Config::getDatabaseConnection();
 $stmt = $pdo->prepare("SELECT * FROM games WHERE id = ?");
 $stmt->execute([$player['game_id']]);
 $gameData = $stmt->fetch();
@@ -138,6 +146,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     switch ($_POST['action']) {
         // New Travel Edition AJAX endpoints
         case 'get_daily_deck':
+            // Check if game is actually active first
+            if ($gameStatus !== 'active') {
+                echo json_encode(['success' => false, 'message' => 'Game not active yet']);
+                exit;
+            }
+            
             if ($gameMode !== 'digital') {
                 echo json_encode(['success' => false, 'message' => 'Not a digital game']);
                 exit;
@@ -457,6 +471,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 exit;
             }
             
+            // Check if we have an opponent player (game is active)
+            if (!$opponentPlayer) {
+                echo json_encode([
+                    'success' => true,
+                    'player_effects' => [],
+                    'opponent_effects' => []
+                ]);
+                exit;
+            }
+            
             $icons = getStatusEffectIcons($player['game_id'], $player['id']);
             $opponentIcons = getStatusEffectIcons($player['game_id'], $opponentPlayer['id']);
             
@@ -563,9 +587,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $waitTime = new DateTime($waitUntil, $timezone);
                 $isWaiting = $now < $waitTime;
                 
-                // Convert to ISO format that JavaScript can parse correctly
+                // Convert to UTC for JavaScript
                 if ($isWaiting) {
-                    $waitUntil = $waitTime->format('c'); // ISO 8601 format with timezone
+                    $waitTime->setTimezone(new DateTimeZone('UTC'));
+                    $waitUntil = $waitTime->format('Y-m-d\TH:i:s.000\Z');
                 }
             }
             
@@ -711,6 +736,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         case 'get_curse_timers':
             if ($gameMode !== 'digital') {
                 echo json_encode(['success' => false, 'message' => 'Not a digital game']);
+                exit;
+            }
+            
+            // Check if opponent exists (game is active)
+            if (!$opponentPlayer) {
+                echo json_encode([
+                    'success' => true,
+                    'player_timer' => null,
+                    'opponent_timer' => null
+                ]);
                 exit;
             }
             
@@ -1012,6 +1047,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             echo json_encode(['success' => $result]);
             exit;
 
+        case 'check_deck_empty':
+            if ($gameMode !== 'digital') {
+                echo json_encode(['success' => false]);
+                exit;
+            }
+            
+            $isEmpty = isDeckEmpty($player['game_id'], $player['id']);
+            echo json_encode(['success' => true, 'is_empty' => $isEmpty]);
+            exit;
+
         case 'get_debug_info':
             if ($gameMode !== 'digital') {
                 echo json_encode(['success' => false]);
@@ -1019,9 +1064,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             }
             
             try {
-                $pdo = Config::getDatabaseConnection();
-                
-                // Get available cards
+                // Get available cards (same logic as deck generation)
                 $available = getAvailableCardsForDeck($player['game_id'], $player['id']);
                 
                 // Get total cards in travel mode
@@ -1032,13 +1075,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $total = [];
                 foreach (['challenge', 'curse', 'power', 'battle'] as $category) {
                     $stmt = $pdo->prepare("
-                        SELECT COUNT(DISTINCT c.id)
+                        SELECT SUM(c.quantity)
                         FROM cards c
                         JOIN card_travel_modes ctm ON c.id = ctm.card_id
                         WHERE c.card_category = ? AND ctm.mode_id = ?
                     ");
                     $stmt->execute([$category, $modeId]);
-                    $total[$category] = $stmt->fetchColumn();
+                    $total[$category] = $stmt->fetchColumn() ?: 0;
                 }
                 
                 echo json_encode([
@@ -1075,20 +1118,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 // Clear all daily deck slots
                 $timezone = new DateTimeZone('America/Indiana/Indianapolis');
                 $today = (new DateTime('now', $timezone))->format('Y-m-d');
-                
-                $stmt = $pdo->prepare("
-                    UPDATE daily_deck_slots 
-                    SET card_id = NULL, drawn_at = NULL, completed_at = NULL, 
-                        completed_by_player_id = NULL, curse_activated = FALSE
-                    WHERE game_id = ? AND deck_date = ?
-                ");
+
+                // Delete daily deck slots entirely (will be recreated)
+                $stmt = $pdo->prepare("DELETE FROM daily_deck_slots WHERE game_id = ? AND deck_date = ?");
                 $stmt->execute([$player['game_id'], $today]);
                 
                 // Clear active curse effects
                 $stmt = $pdo->prepare("DELETE FROM active_curse_effects WHERE game_id = ?");
                 $stmt->execute([$player['game_id']]);
                 
-                // Delete old daily decks
+                // Delete daily deck cards first (child records)
+                $stmt = $pdo->prepare("
+                    DELETE ddc FROM daily_deck_cards ddc
+                    JOIN daily_decks dd ON ddc.deck_id = dd.id
+                    WHERE dd.game_id = ? AND dd.deck_date = ?
+                ");
+                $stmt->execute([$player['game_id'], $today]);
+
+                // Then delete daily decks (parent records)
                 $stmt = $pdo->prepare("DELETE FROM daily_decks WHERE game_id = ? AND deck_date = ?");
                 $stmt->execute([$player['game_id'], $today]);
                 
@@ -1156,6 +1203,61 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     if($travelModeClass) { $classes[] = $travelModeClass; }
     echo implode(' ', $classes);
 ?>">
+    <div class="background-container cruise">
+        <div class="ocean">
+            <div class="wave"></div>
+            <div class="wave"></div>
+        </div>
+
+        <!-- Clouds -->
+        <div class="cloud cloud-1"></div>
+        <div class="cloud cloud-2"></div>
+        <div class="cloud cloud-3"></div>
+
+        <!-- Cruise Ship -->
+        <div class="cruise-ship">
+            <div class="ship-hull"></div>
+            <div class="ship-stripe"></div>
+            
+            <div class="ship-deck-1">
+                <div class="porthole porthole-1-1"></div>
+                <div class="porthole porthole-1-2"></div>
+                <div class="porthole porthole-1-3"></div>
+                <div class="porthole porthole-1-4"></div>
+                <div class="porthole porthole-1-5"></div>
+                <div class="porthole porthole-1-6"></div>
+                <div class="porthole porthole-1-7"></div>
+            </div>
+            
+            <div class="ship-deck-2">
+                <div class="porthole porthole-2-1"></div>
+                <div class="porthole porthole-2-2"></div>
+                <div class="porthole porthole-2-3"></div>
+                <div class="porthole porthole-2-4"></div>
+                <div class="porthole porthole-2-5"></div>
+                <div class="porthole porthole-2-6"></div>
+            </div>
+            
+            <div class="ship-deck-3">
+                <div class="porthole porthole-3-1"></div>
+                <div class="porthole porthole-3-2"></div>
+                <div class="porthole porthole-3-3"></div>
+                <div class="porthole porthole-3-4"></div>
+                <div class="porthole porthole-3-5"></div>
+            </div>
+            
+            <div class="ship-bridge">
+                <div class="bridge-window bridge-window-1"></div>
+                <div class="bridge-window bridge-window-2"></div>
+                <div class="bridge-window bridge-window-3"></div>
+            </div>
+            
+            <div class="ship-funnel funnel-1"></div>
+            <div class="ship-funnel funnel-2"></div>
+            <div class="smoke"></div>
+            <div class="smoke"></div>
+        </div>
+    </div>
     <div class="container">
         <?php if ($gameStatus === 'waiting' && count($players) < 2): ?>
             <!-- Waiting for other player -->
@@ -1223,6 +1325,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 
                 <button class="btn" onclick="setGameDates()" id="setDatesBtn">Start Adventure</button>
             </div>
+            <script>
+
+            // Set default dates using Indianapolis timezone
+            document.addEventListener('DOMContentLoaded', function() {
+                const startInput = document.getElementById('startDate');
+                const endInput = document.getElementById('endDate');
+                
+                if (startInput && endInput) {
+                    // Get current time in Indianapolis timezone
+                    const indianaTime = new Date().toLocaleString("en-US", {timeZone: "America/Indiana/Indianapolis"});
+                    const today = new Date(indianaTime);
+                    
+                    // Set start date to today
+                    const year = today.getFullYear();
+                    const month = String(today.getMonth() + 1).padStart(2, '0');
+                    const day = String(today.getDate()).padStart(2, '0');
+                    startInput.value = `${year}-${month}-${day}`;
+                    
+                    // Set end date to 7 days from today
+                    const endDate = new Date(today);
+                    endDate.setDate(today.getDate() + 7);
+                    const endYear = endDate.getFullYear();
+                    const endMonth = String(endDate.getMonth() + 1).padStart(2, '0');
+                    const endDay = String(endDate.getDate()).padStart(2, '0');
+                    endInput.value = `${endYear}-${endMonth}-${endDay}`;
+                }
+            });
+            </script>
 
         <?php elseif ($gameStatus === 'waiting' && $gameData['start_date']): 
             $timezone = new DateTimeZone('America/Indiana/Indianapolis');

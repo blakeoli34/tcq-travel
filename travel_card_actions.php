@@ -49,6 +49,13 @@ function completeChallenge($gameId, $playerId, $slotNumber) {
         // Clear challenge modify effects
         clearChallengeModifiers($gameId, $playerId);
 
+        // Track as completed
+        $stmt = $pdo->prepare("
+            INSERT IGNORE INTO completed_cards (game_id, player_id, card_id, card_type)
+            VALUES (?, ?, ?, 'challenge')
+        ");
+        $stmt->execute([$gameId, $playerId, $card['card_id']]);
+
         // Notify opponent
         $opponentId = getOpponentPlayerId($gameId, $playerId);
         $stmt = $pdo->prepare("SELECT fcm_token, first_name FROM players WHERE id = ?");
@@ -136,6 +143,13 @@ function vetoChallenge($gameId, $playerId, $slotNumber) {
         
         // Clear slot
         clearSlot($gameId, $playerId, $slotNumber);
+
+        // Track as completed
+        $stmt = $pdo->prepare("
+            INSERT IGNORE INTO completed_cards (game_id, player_id, card_id, card_type)
+            VALUES (?, ?, ?, 'battle')
+        ");
+        $stmt->execute([$gameId, $playerId, $card['card_id']]);
 
         // Notify opponent
         $opponentId = getOpponentPlayerId($gameId, $playerId);
@@ -245,6 +259,13 @@ function completeBattle($gameId, $playerId, $slotNumber, $isWinner) {
         // Mark slot as completed
         completeClearSlot($gameId, $playerId, $slotNumber);
 
+        // Track as completed
+        $stmt = $pdo->prepare("
+            INSERT IGNORE INTO completed_cards (game_id, player_id, card_id, card_type)
+            VALUES (?, ?, ?, 'battle')
+        ");
+        $stmt->execute([$gameId, $playerId, $card['card_id']]);
+
         $players = getGamePlayers($gameId);
         foreach ($players as $p) {
             if ($p['fcm_token'] && $p['id'] === $opponentId) {
@@ -313,6 +334,13 @@ function activateCurse($gameId, $playerId, $slotNumber) {
             WHERE game_id = ? AND player_id = ? AND deck_date = ? AND slot_number = ?
         ");
         $stmt->execute([$gameId, $playerId, $today, $slotNumber]);
+
+        // Track as completed
+        $stmt = $pdo->prepare("
+            INSERT IGNORE INTO completed_cards (game_id, player_id, card_id, card_type)
+            VALUES (?, ?, ?, 'curse')
+        ");
+        $stmt->execute([$gameId, $playerId, $card['card_id']]);
         
         $pdo->commit();
         return ['success' => true, 'effects' => $effects, 'effect_id' => $effectId];

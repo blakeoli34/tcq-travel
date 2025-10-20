@@ -306,13 +306,25 @@ function deleteGame($gameId) {
         $pdo->beginTransaction();
         
         // Delete related records first (due to foreign key constraints)
+        // Start with the most dependent tables first
+        
+        // Delete daily_deck_cards first (depends on daily_decks)
+        $stmt = $pdo->prepare("
+            DELETE ddc FROM daily_deck_cards ddc
+            JOIN daily_decks dd ON ddc.deck_id = dd.id
+            WHERE dd.game_id = ?
+        ");
+        $stmt->execute([$gameId]);
+        
+        // Now delete daily_decks
+        $stmt = $pdo->prepare("DELETE FROM daily_decks WHERE game_id = ?");
+        $stmt->execute([$gameId]);
+        
+        // Delete other related records
         $stmt = $pdo->prepare("DELETE FROM score_history WHERE game_id = ?");
         $stmt->execute([$gameId]);
         
         $stmt = $pdo->prepare("DELETE FROM timers WHERE game_id = ?");
-        $stmt->execute([$gameId]);
-        
-        $stmt = $pdo->prepare("DELETE FROM daily_decks WHERE game_id = ?");
         $stmt->execute([$gameId]);
         
         $stmt = $pdo->prepare("DELETE FROM daily_deck_slots WHERE game_id = ?");

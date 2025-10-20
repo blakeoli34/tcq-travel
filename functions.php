@@ -530,7 +530,7 @@ function updateFcmToken($deviceId, $fcmToken) {
 
 function getAccessToken() {
     
-    $cacheFile = 'tokens/fcm_access_token.json';
+    $cacheFile = '/tmp/fcm_access_token.json';
     
     // Check if we have a cached token that's still valid
     if ($cacheFile && file_exists($cacheFile)) {
@@ -934,8 +934,27 @@ function cleanupExpiredEffects($gameId) {
     // Clean up expired veto waits
     try {
         $pdo = Config::getDatabaseConnection();
-        $stmt = $pdo->prepare("UPDATE players SET veto_wait_until = NULL WHERE game_id = ? AND veto_wait_until <= NOW()");
+        
+        // DEBUG: Check what's being cleared
+        $timezone = new DateTimeZone('America/Indiana/Indianapolis');
+        $now = new DateTime('now', $timezone);
+        
+        $stmt = $pdo->prepare("SELECT id, first_name, veto_wait_until FROM players WHERE game_id = ? AND veto_wait_until IS NOT NULL");
         $stmt->execute([$gameId]);
+        $activePlayers = $stmt->fetchAll();
+        
+        foreach ($activePlayers as $p) {
+            $waitTime = new DateTime($p['veto_wait_until'], $timezone);
+            $expired = $now >= $waitTime;
+        }
+        
+        $stmt = $pdo->prepare("UPDATE players SET veto_wait_until = NULL WHERE game_id = ? AND veto_wait_until <= ?");
+        $stmt->execute([$gameId, $now->format('Y-m-d H:i:s')]);
+        $clearedCount = $stmt->rowCount();
+        
+        if ($clearedCount > 0) {
+            error_log("CLEARED {$clearedCount} veto waits in cleanupExpiredEffects");
+        }
     } catch (Exception $e) {
         error_log("Error cleaning up veto waits: " . $e->getMessage());
     }

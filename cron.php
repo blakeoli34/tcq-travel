@@ -49,30 +49,27 @@ switch ($action) {
 function sendDailyNotifications() {
     error_log("Starting daily deck notifications...");
     
-    // Activate games that have reached their start time
-    $timezone = new DateTimeZone('America/Indiana/Indianapolis');
-    $now = new DateTime('now', $timezone);
-
-    $stmt = $pdo->query("
-        SELECT id FROM games 
-        WHERE status = 'waiting' 
-        AND start_date IS NOT NULL 
-        AND start_date <= NOW()
-    ");
-    $gamesToActivate = $stmt->fetchAll(PDO::FETCH_COLUMN);
-
-    foreach ($gamesToActivate as $gameId) {
-        $stmt = $pdo->prepare("UPDATE games SET status = 'active' WHERE id = ?");
-        $stmt->execute([$gameId]);
-        
-        // Initialize Travel Edition for this game
-        initializeTravelEdition($gameId);
-    }
-    
     try {
         $pdo = Config::getDatabaseConnection();
         $timezone = new DateTimeZone('America/Indiana/Indianapolis');
         $now = new DateTime('now', $timezone);
+        
+        // Activate games that have reached their start time
+        $stmt = $pdo->query("
+            SELECT id FROM games 
+            WHERE status = 'waiting' 
+            AND start_date IS NOT NULL 
+            AND start_date <= NOW()
+        ");
+        $gamesToActivate = $stmt->fetchAll(PDO::FETCH_COLUMN);
+
+        foreach ($gamesToActivate as $gameId) {
+            $stmt = $pdo->prepare("UPDATE games SET status = 'active' WHERE id = ?");
+            $stmt->execute([$gameId]);
+            
+            // Initialize Travel Edition for this game
+            initializeTravelEdition($gameId);
+        }
         
         // Get players in active digital games that started today or earlier
         $stmt = $pdo->query("
@@ -139,7 +136,7 @@ function sendDailyNotifications() {
 }
 
 function endOfDayNotification() {
-
+    $pdo = Config::getDatabaseConnection();
     // Get players in active digital games that started today or earlier
     $stmt = $pdo->query("
         SELECT g.id as game_id, g.start_date, g.end_date,
