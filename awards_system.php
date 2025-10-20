@@ -232,8 +232,8 @@ function awardChallengeMaster($gameId) {
             $masterId = $gameStats['challenge_master']['player_id'];
             $challengeCount = $gameStats['challenge_master']['challenges_completed'];
             
-            // Award 10 points for being challenge master
-            $awardPoints = 10;
+            // Award 25 points for being challenge master
+            $awardPoints = 25;
             updateScore($gameId, $masterId, $awardPoints, $masterId);
             recordPlayerAward($gameId, $masterId, 'challenge_master', $challengeCount, $awardPoints);
             

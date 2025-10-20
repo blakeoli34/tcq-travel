@@ -297,11 +297,6 @@ function activateCurse($gameId, $playerId, $slotNumber) {
         $timezone = new DateTimeZone('America/Indiana/Indianapolis');
         $today = (new DateTime('now', $timezone))->format('Y-m-d');
         
-        // Check veto wait
-        if (isPlayerWaitingVeto($gameId, $playerId)) {
-            return ['success' => false, 'message' => 'Cannot interact with deck during veto wait period'];
-        }
-        
         $pdo->beginTransaction();
         
         // Get card in slot
@@ -439,6 +434,96 @@ function claimPower($gameId, $playerId, $slotNumber) {
     } catch (Exception $e) {
         $pdo->rollBack();
         error_log("Error claiming power: " . $e->getMessage());
+        return ['success' => false, 'message' => $e->getMessage()];
+    }
+}
+
+function activatePowerFromSlot($gameId, $playerId, $slotNumber) {
+    try {
+        $pdo = Config::getDatabaseConnection();
+        $timezone = new DateTimeZone('America/Indiana/Indianapolis');
+        $today = (new DateTime('now', $timezone))->format('Y-m-d');
+        
+        $pdo->beginTransaction();
+        
+        // Get power card in slot
+        $stmt = $pdo->prepare("
+            SELECT dds.*, c.*
+            FROM daily_deck_slots dds
+            JOIN cards c ON dds.card_id = c.id
+            WHERE dds.game_id = ? AND dds.player_id = ? AND dds.deck_date = ? AND dds.slot_number = ? AND c.card_category = 'power'
+        ");
+        $stmt->execute([$gameId, $playerId, $today, $slotNumber]);
+        $card = $stmt->fetch();
+        
+        if (!$card) {
+            throw new Exception("No power card in this slot");
+        }
+        
+        $effects = [];
+        $opponentId = getOpponentPlayerId($gameId, $playerId);
+        $targetPlayerId = $card['target_opponent'] ? $opponentId : $playerId;
+        
+        // Apply immediate effects
+        if ($card['power_score_add']) {
+            // Only apply instantly if no snap/spicy/challenge modify
+            if (!$card['power_snap_modify'] && !$card['power_spicy_modify'] && !$card['power_challenge_modify']) {
+                updateScore($gameId, $targetPlayerId, $card['power_score_add'], $playerId);
+                $targetName = $card['target_opponent'] ? "Opponent gained" : "Gained";
+                $effects[] = "{$targetName} {$card['power_score_add']} points";
+            } else {
+                $effects[] = "Next completed card will give +{$card['power_score_add']} bonus points";
+            }
+        }
+        
+        if ($card['power_score_subtract']) {
+            updateScore($gameId, $targetPlayerId, -$card['power_score_subtract'], $playerId);
+            $targetName = $card['target_opponent'] ? "Opponent lost" : "Lost";
+            $effects[] = "{$targetName} {$card['power_score_subtract']} points";
+        }
+        
+        if ($card['power_score_steal']) {
+            updateScore($gameId, $opponentId, -$card['power_score_steal'], $playerId);
+            updateScore($gameId, $playerId, $card['power_score_steal'], $playerId);
+            $effects[] = "Stole {$card['power_score_steal']} points from opponent";
+        }
+        
+        if ($card['power_wait']) {
+            applyVetoWait($gameId, $targetPlayerId, $card['power_wait']);
+            $targetName = $card['target_opponent'] ? "Opponent" : "You";
+            $effects[] = "{$targetName} cannot interact with deck for {$card['power_wait']} minutes";
+        }
+        
+        if ($card['clear_curse']) {
+            clearPlayerCurseEffects($gameId, $playerId);
+            $effects[] = "Cleared all active curse effects";
+        }
+        
+        if ($card['shuffle_daily_deck']) {
+            shuffleDailyDeck($gameId, $playerId);
+            $effects[] = "Daily deck shuffled";
+        }
+        
+        // Create ongoing effects if needed
+        if ($card['power_challenge_modify'] || $card['power_snap_modify'] || 
+            $card['power_spicy_modify'] || $card['power_score_modify'] !== 'none' ||
+            $card['power_veto_modify'] !== 'none' || $card['skip_challenge'] ||
+            $card['deck_peek'] || $card['card_swap'] || $card['bypass_expiration']) {
+            
+            $effectId = addActivePowerEffect($gameId, $playerId, $card['card_id'], $card);
+            error_log("Created active power effect ID: $effectId for card {$card['card_id']}");
+            $effects[] = "Ongoing power effect activated";
+        }
+        
+        // Clear slot
+        completeClearSlot($gameId, $playerId, $slotNumber);
+        
+        $pdo->commit();
+        return ['success' => true, 'message' => implode(', ', $effects)];
+        
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        error_log("Error activating power from slot: " . $e->getMessage());
         return ['success' => false, 'message' => $e->getMessage()];
     }
 }
@@ -801,8 +886,8 @@ function addActivePowerEffect($gameId, $playerId, $cardId, $card) {
         }
         
         $stmt = $pdo->prepare("
-            INSERT INTO active_power_effects (game_id, player_id, power_card_id, expires_at)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO active_power_effects (game_id, player_id, power_card_id, expires_at, power_type)
+            VALUES (?, ?, ?, ?, 'power')
         ");
         $stmt->execute([$gameId, $playerId, $cardId, $expiresAt]);
         
@@ -826,7 +911,7 @@ function skipChallenge($gameId, $playerId, $slotNumber) {
         $stmt = $pdo->prepare("
             SELECT ape.*, c.card_name
             FROM active_power_effects ape
-            JOIN cards c ON ape.card_id = c.id
+            JOIN cards c ON ape.power_card_id = c.id
             WHERE ape.game_id = ? AND ape.player_id = ? AND c.skip_challenge = 1
         ");
         $stmt->execute([$gameId, $playerId]);
@@ -928,12 +1013,12 @@ function getActiveModifiers($gameId, $playerId) {
         // Get active power modifiers
         $stmt = $pdo->prepare("
             SELECT c.card_name, c.power_challenge_modify as challenge_modify, 
-                   c.power_snap_modify as snap_modify, c.power_spicy_modify as spicy_modify, 
-                   c.skip_challenge, 'power' as type
+                c.power_snap_modify as snap_modify, c.power_spicy_modify as spicy_modify, 
+                c.skip_challenge, c.bypass_expiration, 'power' as type
             FROM active_power_effects ape
             JOIN cards c ON ape.power_card_id = c.id
             WHERE ape.game_id = ? AND ape.player_id = ? 
-            AND (c.power_challenge_modify = 1 OR c.power_snap_modify = 1 OR c.power_spicy_modify = 1 OR c.skip_challenge = 1)
+            AND (c.power_challenge_modify = 1 OR c.power_snap_modify = 1 OR c.power_spicy_modify = 1 OR c.skip_challenge = 1 OR c.bypass_expiration = 1)
         ");
         $stmt->execute([$gameId, $playerId]);
         $powerModifiers = $stmt->fetchAll();

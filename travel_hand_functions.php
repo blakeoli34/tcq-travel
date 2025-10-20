@@ -409,6 +409,130 @@ function vetoSnapSpicyCard($gameId, $playerId, $playerCardId, $cardType) {
     }
 }
 
+function completeStoredChallenge($gameId, $playerId, $playerCardId) {
+    try {
+        $pdo = Config::getDatabaseConnection();
+        $pdo->beginTransaction();
+        
+        // Get stored challenge details
+        $stmt = $pdo->prepare("
+            SELECT pc.*, c.*
+            FROM player_cards pc
+            JOIN cards c ON pc.card_id = c.id
+            WHERE pc.id = ? AND pc.player_id = ? AND pc.game_id = ? AND pc.card_type = 'stored_challenge'
+        ");
+        $stmt->execute([$playerCardId, $playerId, $gameId]);
+        $card = $stmt->fetch();
+        
+        if (!$card) {
+            throw new Exception("Stored challenge not found in hand");
+        }
+        
+        // Apply modifiers and award points
+        $finalPoints = applyModifiersToChallenge($gameId, $playerId, $card['card_points']);
+        
+        if ($finalPoints > 0) {
+            updateScore($gameId, $playerId, $finalPoints, $playerId);
+        }
+        
+        // Update challenge completion count
+        $stmt = $pdo->prepare("
+            UPDATE player_stats 
+            SET challenges_completed = challenges_completed + 1
+            WHERE game_id = ? AND player_id = ?
+        ");
+        $stmt->execute([$gameId, $playerId]);
+        
+        // Clear challenge modify effects
+        clearChallengeModifiers($gameId, $playerId);
+        
+        // Remove from hand
+        if ($card['quantity'] > 1) {
+            $stmt = $pdo->prepare("UPDATE player_cards SET quantity = quantity - 1 WHERE id = ?");
+            $stmt->execute([$playerCardId]);
+        } else {
+            $stmt = $pdo->prepare("DELETE FROM player_cards WHERE id = ?");
+            $stmt->execute([$playerCardId]);
+        }
+        
+        $pdo->commit();
+        return ['success' => true, 'points_awarded' => $finalPoints];
+        
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        error_log("Error completing stored challenge: " . $e->getMessage());
+        return ['success' => false, 'message' => $e->getMessage()];
+    }
+}
+
+function vetoStoredChallenge($gameId, $playerId, $playerCardId) {
+    try {
+        $pdo = Config::getDatabaseConnection();
+        $pdo->beginTransaction();
+        
+        // Get stored challenge details
+        $stmt = $pdo->prepare("
+            SELECT pc.*, c.*
+            FROM player_cards pc
+            JOIN cards c ON pc.card_id = c.id
+            WHERE pc.id = ? AND pc.player_id = ? AND pc.game_id = ? AND pc.card_type = 'stored_challenge'
+        ");
+        $stmt->execute([$playerCardId, $playerId, $gameId]);
+        $card = $stmt->fetch();
+        
+        if (!$card) {
+            throw new Exception("Stored challenge not found in hand");
+        }
+        
+        $penalties = [];
+        
+        // Apply veto penalties
+        if ($card['veto_subtract']) {
+            updateScore($gameId, $playerId, -$card['veto_subtract'], $playerId);
+            $penalties[] = "Lost {$card['veto_subtract']} points";
+        }
+        
+        if ($card['veto_steal']) {
+            $opponentId = getOpponentPlayerId($gameId, $playerId);
+            updateScore($gameId, $playerId, -$card['veto_steal'], $playerId);
+            updateScore($gameId, $opponentId, $card['veto_steal'], $playerId);
+            $penalties[] = "Lost {$card['veto_steal']} points to opponent";
+        }
+        
+        if ($card['veto_wait']) {
+            applyVetoWait($gameId, $playerId, $card['veto_wait']);
+            $penalties[] = "Cannot interact with deck for {$card['veto_wait']} minutes";
+        }
+        
+        if ($card['veto_snap']) {
+            addSnapCards($gameId, $playerId, $card['veto_snap']);
+            $penalties[] = "Drew {$card['veto_snap']} snap card(s)";
+        }
+        
+        if ($card['veto_spicy']) {
+            addSpicyCards($gameId, $playerId, $card['veto_spicy']);
+            $penalties[] = "Drew {$card['veto_spicy']} spicy card(s)";
+        }
+        
+        // Remove from hand
+        if ($card['quantity'] > 1) {
+            $stmt = $pdo->prepare("UPDATE player_cards SET quantity = quantity - 1 WHERE id = ?");
+            $stmt->execute([$playerCardId]);
+        } else {
+            $stmt = $pdo->prepare("DELETE FROM player_cards WHERE id = ?");
+            $stmt->execute([$playerCardId]);
+        }
+        
+        $pdo->commit();
+        return ['success' => true, 'penalties' => $penalties];
+        
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        error_log("Error vetoing stored challenge: " . $e->getMessage());
+        return ['success' => false, 'message' => $e->getMessage()];
+    }
+}
+
 function drawFromSnapDeck($gameId, $playerId) {
     try {
         $pdo = Config::getDatabaseConnection();
@@ -583,7 +707,7 @@ function getPlayerHand($gameId, $playerId) {
                    c.veto_subtract, c.veto_steal, c.veto_wait
             FROM player_cards pc
             JOIN cards c ON pc.card_id = c.id
-            WHERE pc.game_id = ? AND pc.player_id = ? AND pc.card_type IN ('power', 'snap', 'spicy')
+            WHERE pc.game_id = ? AND pc.player_id = ? AND pc.card_type IN ('power', 'snap', 'spicy', 'stored_challenge')
             ORDER BY pc.card_type, c.card_name
         ");
         $stmt->execute([$gameId, $playerId]);

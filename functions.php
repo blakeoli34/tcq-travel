@@ -826,8 +826,8 @@ function resetGameForNewRound($gameId) {
         $stmt = $pdo->prepare("UPDATE players SET score = 0, ready_for_new_game = FALSE, veto_wait_until = NULL WHERE game_id = ?");
         $stmt->execute([$gameId]);
         
-        // Reset game: status to waiting, clear dates and duration
-        $stmt = $pdo->prepare("UPDATE games SET status = 'waiting', duration_days = NULL, start_date = NULL, end_date = NULL, game_mode = NULL WHERE id = ?");
+        // Reset game: status to waiting, clear dates, mode and duration
+        $stmt = $pdo->prepare("UPDATE games SET status = 'waiting', duration_days = NULL, start_date = NULL, end_date = NULL, game_mode = 'digital', travel_mode_id = NULL WHERE id = ?");
         $stmt->execute([$gameId]);
         
         // Clear timers
@@ -861,6 +861,9 @@ function resetGameForNewRound($gameId) {
         $stmt->execute([$gameId]);
         
         $stmt = $pdo->prepare("DELETE FROM player_awards WHERE game_id = ?");
+        $stmt->execute([$gameId]);
+
+        $stmt = $pdo->prepare("DELETE FROM completed_cards WHERE game_id = ?");
         $stmt->execute([$gameId]);
 
         $pdo->commit();
@@ -914,10 +917,12 @@ function initializeTravelEdition($gameId) {
         
         foreach ($playerIds as $playerId) {
             initializePlayerStats($gameId, $playerId);
+            $deckResult = generateDailyDeck($gameId, $playerId);
+            if (!$deckResult['success']) {
+                error_log("Failed to generate daily deck for player {$playerId}: " . $deckResult['message']);
+            }
         }
         
-        // Generate first daily deck
-        $deckResult = generateDailyDeck($gameId);
         
         return $deckResult;
         

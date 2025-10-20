@@ -235,6 +235,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             echo json_encode($result);
             exit;
 
+        case 'complete_stored_challenge':
+            if ($gameMode !== 'digital') {
+                echo json_encode(['success' => false, 'message' => 'Not a digital game']);
+                exit;
+            }
+            
+            $playerCardId = intval($_POST['player_card_id']);
+            $result = completeStoredChallenge($player['game_id'], $player['id'], $playerCardId);
+            echo json_encode($result);
+            exit;
+
+        case 'veto_stored_challenge':
+            if ($gameMode !== 'digital') {
+                echo json_encode(['success' => false, 'message' => 'Not a digital game']);
+                exit;
+            }
+            
+            $playerCardId = intval($_POST['player_card_id']);
+            $result = vetoStoredChallenge($player['game_id'], $player['id'], $playerCardId);
+            echo json_encode($result);
+            exit;
+
         case 'complete_battle':
             if ($gameMode !== 'digital') {
                 echo json_encode(['success' => false, 'message' => 'Not a digital game']);
@@ -266,6 +288,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             
             $slotNumber = intval($_POST['slot_number']);
             $result = claimPower($player['game_id'], $player['id'], $slotNumber);
+            echo json_encode($result);
+            exit;
+
+        case 'activate_power':
+            if ($gameMode !== 'digital') {
+                echo json_encode(['success' => false, 'message' => 'Not a digital game']);
+                exit;
+            }
+            
+            $slotNumber = intval($_POST['slot_number']);
+            $result = activatePowerFromSlot($player['game_id'], $player['id'], $slotNumber);
             echo json_encode($result);
             exit;
 
@@ -1299,7 +1332,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 </div>
             </div>
             
-        <?php elseif ($gameStatus === 'waiting' && count($players) === 2 && $gameMode && !$gameData['start_date']): ?>
+        <?php elseif ($gameStatus === 'waiting' && count($players) === 2 && $gameData['travel_mode_id'] && !$gameData['start_date']): ?>
             <!-- Set game dates -->
             <div class="waiting-screen duration">
                 <div class="notify-bubble" style="margin-bottom: 30px; padding: 20px; border-radius: 15px;">
@@ -1428,19 +1461,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             }
             ?>
             
-            <!-- Game Timer -->
-            <div class="game-timer">
-                <?= $gameTimeText ?>
-            </div>
-
-            <!-- Hand Indicator -->
-            <div class="hand-indicator" id="handIndicator" onclick="toggleHandOverlay()">
-                <div class="hand-count">
+            <!-- Combined Game Timer and Hand Indicator -->
+            <div class="game-timer-hand" id="gameTimerHand" onclick="toggleHandOverlay()">
+                <div class="timer-section">
+                    <span class="game-time"><?= $gameTimeText ?></span>
+                </div>
+                <div class="hand-section">
                     <i class="fa-solid fa-cards-blank"></i>
                     <span id="handCardCount">0</span>
-                </div>
-                <div class="hand-chevron">
-                    <i class="fa-solid fa-chevron-down"></i>
                 </div>
             </div>
             
@@ -1688,6 +1716,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 currentPlayerId: <?= $currentPlayer['id'] ?>,
                 opponentPlayerId: <?= $opponentPlayer['id'] ?>,
                 gameStatus: '<?= $gameStatus ?>',
+                gameId: '<?= $currentPlayer['game_id'] ?>',
                 startDate: '<?= $gameData['start_date'] ?>',
                 currentPlayerGender: '<?= $currentPlayer['gender'] ?>',
                 opponentPlayerGender: '<?= $opponentPlayer['gender'] ?>',

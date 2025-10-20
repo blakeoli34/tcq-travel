@@ -298,9 +298,9 @@ body.cruise .background-container.cruise {
     right: 15px;
 }
 
-.cloud-1 { top: 15%; animation-duration: 20s; }
-.cloud-2 { top: 25%; animation-duration: 25s; animation-delay: -5s; }
-.cloud-3 { top: 35%; animation-duration: 18s; animation-delay: -10s; }
+.cloud-1 { top: 7%; animation-duration: 20s; }
+.cloud-2 { top: 23%; animation-duration: 25s; animation-delay: -5s; }
+.cloud-3 { top: 41%; animation-duration: 18s; animation-delay: -10s; }
 
 
 @media (prefers-color-scheme: dark) {
@@ -447,8 +447,8 @@ body.cruise .background-container.cruise {
 }
 
 /* Game Timer */
-.game-timer {
-    background: rgba(255,255,255,0.9);
+.game-timer-hand {
+    background: rgba(255,255,255,0.7);
     color: #111;
     text-align: center;
     padding: 8px 20px;
@@ -462,11 +462,15 @@ body.cruise .background-container.cruise {
     opacity: 0;
     border-radius: 20px;
     backdrop-filter: blur(8px);
-    border: solid 1px rgba(255,255,255,0.2);
+    border: solid 2px #fff;
     transition: all 0.3s ease;
 }
 
-.game-timer.visible {
+.game-timer-hand .timer-section {
+    margin-bottom: 4px;
+}
+
+.game-timer-hand.visible {
     transform: translate(-50%, 0);
     opacity: 1;
 }
@@ -477,8 +481,7 @@ body.cruise .background-container.cruise {
     top: 0;
     left: 0;
     width: 100%;
-    height: 80vh;
-    border-radius: 0 0 60px 60px;
+    height: calc(100vh + 20px);
     background: rgba(34,34,34,0.7);
     backdrop-filter: blur(8px);
     z-index: 2000;
@@ -489,7 +492,7 @@ body.cruise .background-container.cruise {
 }
 
 .hand-overlay.active {
-    transform: translateY(0);
+    transform: translateY(-20px);
 }
 
 .hand-content {
@@ -614,6 +617,7 @@ body.cruise .background-container.cruise {
     color: white;
     flex-shrink: 0;
     transform: rotate(45deg);
+    background: #aaa;
 }
 
 .hand-slot-card-type-icon i {
@@ -621,6 +625,7 @@ body.cruise .background-container.cruise {
 }
 
 .hand-slot-card-type-icon.power { background: #68B684; }
+.hand-slot-card-type-icon.stored_challenge { background: #F39237; }
 .hand-slot-card-type-icon.snap { background: var(--color-pink); }
 .hand-slot-card-type-icon.spicy { background: var(--color-blue); }
 
@@ -775,15 +780,15 @@ body.cruise .background-container.cruise {
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: flex-start;
+    justify-content: center;
     padding: 40px 20px;
     position: relative;
-    margin-top: 15vh;
-    margin-bottom: 120px;
+    margin-top: 10vh;
+    margin-bottom: 15vh;
     opacity: 0;
     transform: scale(0.9);
     transition: all 0.5s;
-    max-height: 70vh;
+    max-height: 75vh;
     overflow-y: scroll;
 }
 
@@ -794,7 +799,7 @@ body.cruise .background-container.cruise {
 
 .deck-message-overlay {
     position: absolute;
-    top: 70px;
+    top: calc(50% - 215px);
     left: 50%;
     width: 100%;
     height: 100%;
@@ -912,6 +917,7 @@ body.cruise .background-container.cruise {
     display: flex;
     align-items: center;
     justify-content: center;
+    backdrop-filter: blur(8px);
     flex-flow: row wrap;
     cursor: pointer;
     transition: all 0.3s ease;
@@ -1208,7 +1214,7 @@ body.cruise .background-container.cruise {
     transform: translate(-50%, 100%);
     opacity: 0;
     transition: all 0.4s ease;
-    z-index: 1000;
+    z-index: 2000;
 }
 
 .score-bug.visible {

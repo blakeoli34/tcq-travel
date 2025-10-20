@@ -75,7 +75,7 @@ $(document).ready(function() {
             checkDeckEmpty();
         }
         setScorebugWidth();
-        $('.score-bug, .game-timer, .hand-indicator').addClass('visible');
+        $('.score-bug, .game-timer-hand').addClass('visible');
     }, 500);
     
     // Periodic updates
@@ -88,6 +88,7 @@ $(document).ready(function() {
         checkCurseBlock();
         updateStatusEffects();
         refreshGameData();
+        checkGameStatus();
         updateCurseTimers();
         updateCardModifiers();
         checkForDeckPeek();
@@ -151,6 +152,25 @@ $(document).ready(function() {
         }
     }
 });
+
+function checkGameStatus() {
+    if (!gameData || gameData.gameStatus !== 'active') return;
+    
+    fetch('game.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'action=check_game_status'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success && data.status === 'completed') {
+            window.location.reload();
+        }
+    })
+    .catch(error => {
+        console.error('Error checking game status:', error);
+    });
+}
 
 // ========================================
 // DAILY DECK MANAGEMENT
@@ -693,6 +713,7 @@ function getSlotActions(cardCategory) {
         case 'power':
             return [
                 { text: 'Claim', onClick: 'claimPower' },
+                { text: 'Activate', onClick: 'activatePower' },
                 { text: 'Discard', onClick: 'discardPower', class: 'btn-secondary' }
             ];
         case 'battle':
@@ -714,8 +735,8 @@ function updateSlotActionsForModifiers() {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            const hasSkipPower = data.modifiers.some(m => m.skip_challenge);
-            const hasBypassPower = data.modifiers.some(m => m.bypass_expiration);
+            const hasSkipPower = data.modifiers.some(m => m.skip_challenge == 1);
+            const hasBypassPower = data.modifiers.some(m => m.bypass_expiration == 1);
             
             document.querySelectorAll('.daily-slot').forEach(slotEl => {
                 const cardContent = slotEl.querySelector('.card-content');
@@ -723,39 +744,38 @@ function updateSlotActionsForModifiers() {
                 
                 const challengeIcon = cardContent.querySelector('.card-type-icon.challenge');
                 if (challengeIcon) {
-                    const actions = cardContent.querySelector('.slot-actions');
-                    if (actions) {
-                        // Remove old power buttons first
-                        const oldSkip = actions.querySelector('.skip-btn');
-                        const oldStore = actions.querySelector('.store-btn');
-                        if (oldSkip) oldSkip.remove();
-                        if (oldStore) oldStore.remove();
-                        
-                        const slotNumber = parseInt(slotEl.dataset.slot);
-                        
-                        // Add skip button
-                        if (hasSkipPower) {
-                            const skipBtn = document.createElement('button');
-                            skipBtn.className = 'slot-action-btn skip-btn';
-                            skipBtn.textContent = 'Skip';
-                            skipBtn.onclick = (e) => {
-                                e.stopPropagation();
-                                skipChallenge(slotNumber);
-                            };
-                            actions.appendChild(skipBtn);
-                        }
-                        
-                        // Add store button
-                        if (hasBypassPower) {
-                            const storeBtn = document.createElement('button');
-                            storeBtn.className = 'slot-action-btn btn-secondary store-btn';
-                            storeBtn.textContent = 'Store';
-                            storeBtn.onclick = (e) => {
-                                e.stopPropagation();
-                                storeChallenge(slotNumber);
-                            };
-                            actions.appendChild(storeBtn);
-                        }
+                    let actions = slotEl.querySelector('.slot-actions');
+                    if (!actions) return;
+                    
+                    const slotNumber = parseInt(slotEl.dataset.slot);
+                    
+                    // Remove old power buttons
+                    actions.querySelectorAll('.skip-btn, .store-btn').forEach(btn => btn.remove());
+                    
+                    // Add skip button
+                    if (hasSkipPower) {
+                        const skipBtn = document.createElement('button');
+                        skipBtn.className = 'slot-action-btn skip-btn';
+                        skipBtn.textContent = 'Skip';
+                        skipBtn.onclick = (e) => {
+                            e.stopPropagation();
+                            skipChallenge(slotNumber);
+                            setTimeout(() => updateSlotActionsForModifiers(), 500);
+                        };
+                        actions.appendChild(skipBtn);
+                    }
+                    
+                    // Add store button
+                    if (hasBypassPower) {
+                        const storeBtn = document.createElement('button');
+                        storeBtn.className = 'slot-action-btn store-btn';
+                        storeBtn.textContent = 'Store';
+                        storeBtn.onclick = (e) => {
+                            e.stopPropagation();
+                            storeChallenge(slotNumber);
+                            setTimeout(() => updateSlotActionsForModifiers(), 500);
+                        };
+                        actions.appendChild(storeBtn);
                     }
                 }
             });
@@ -808,7 +828,7 @@ document.addEventListener('click', function(e) {
 
     if (handOverlayOpen && 
         !e.target.closest('#handOverlay') && 
-        !e.target.closest('#handIndicator')) {
+        !e.target.closest('#gameTimerHand')) {
         toggleHandOverlay();
     }
 });
@@ -885,9 +905,6 @@ function completeChallenge(slotNumber) {
         .then(response => response.json())
         .then(data => {
             if (data.success) {
-                if (data.points_awarded) {
-                    setTimeout(() => refreshGameData(), 500);
-                }
                 loadDailyDeck();
             } else {
                 alert('Failed to complete challenge: ' + data.message);
@@ -912,6 +929,57 @@ function vetoChallenge(slotNumber) {
         .then(data => {
             if (data.success) {
                 loadDailyDeck();
+            } else {
+                alert('Failed to veto challenge: ' + data.message);
+            }
+        });
+    }, 600);
+}
+
+function completeStoredChallenge(playerCardId) {
+    const cardSlot = document.querySelector(`[onclick*="completeStoredChallenge(${playerCardId})"]`)?.closest('.hand-slot');
+    
+    if (cardSlot) {
+        playSoundIfEnabled('/card-completed.m4r');
+        animateCardComplete(cardSlot);
+    }
+    
+    setTimeout(() => {
+        fetch('game.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: `action=complete_stored_challenge&player_card_id=${playerCardId}`
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                loadHandCards();
+                setTimeout(() => refreshGameData(), 500);
+            } else {
+                alert('Failed to complete challenge: ' + data.message);
+            }
+        });
+    }, 500);
+}
+
+function vetoStoredChallenge(playerCardId) {
+    const cardSlot = document.querySelector(`[onclick*="vetoStoredChallenge(${playerCardId})"]`)?.closest('.hand-slot');
+    
+    if (cardSlot) {
+        playSoundIfEnabled('/card-vetoed.m4r');
+        animateCardVeto(cardSlot);
+    }
+    
+    setTimeout(() => {
+        fetch('game.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: `action=veto_stored_challenge&player_card_id=${playerCardId}`
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                loadHandCards();
                 setTimeout(() => refreshGameData(), 1000);
             } else {
                 alert('Failed to veto challenge: ' + data.message);
@@ -961,6 +1029,28 @@ function claimPower(slotNumber) {
     });
 }
 
+function activatePower(slotNumber) {
+    fetch('game.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: `action=activate_power&slot_number=${slotNumber}`
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            playSoundIfEnabled('/card-power.m4r');
+            showInAppNotification('Power Activated!', data.message);
+            loadDailyDeck();
+            setTimeout(() => {
+                refreshGameData();
+                updateStatusEffects();
+            }, 1500);
+        } else {
+            alert('Failed to activate power: ' + data.message);
+        }
+    });
+}
+
 function discardPower(slotNumber) {
     fetch('game.php', {
         method: 'POST',
@@ -1002,7 +1092,6 @@ function completeBattle(slotNumber, isWinner) {
         .then(data => {
             if (data.success) {
                 loadDailyDeck();
-                setTimeout(() => refreshGameData(), 1000);
             } else {
                 alert('Failed to complete battle: ' + data.message);
             }
@@ -1032,7 +1121,11 @@ function updateDeckCounts() {
     });
 }
 
-function toggleHandOverlay() {
+function toggleHandOverlay(event) {
+    if (event) {
+        event.stopPropagation();
+        event.preventDefault();
+    }
     const overlay = document.getElementById('handOverlay');
     if (!overlay) return;
     
@@ -1042,6 +1135,7 @@ function toggleHandOverlay() {
         loadHandCards();
         overlay.classList.add('active');
         setOverlayActive(true);
+        setTimeout(() => updateCardModifiers(), 100);
     } else {
         overlay.classList.remove('active');
         setOverlayActive(false);
@@ -1094,6 +1188,7 @@ function createHandCardElement(card) {
 
 function getCardTypeIcon(type) {
     const icons = {
+        'stored_challenge': '<i class="fa-solid fa-flag-checkered"></i> Challenge',
         'challenge': '<i class="fa-solid fa-flag-checkered"></i> Challenge',
         'power': '<i class="fa-solid fa-bolt"></i> Power',
         'snap': '<i class="fa-solid fa-camera-retro"></i> Snap',
@@ -1127,6 +1222,11 @@ function showHandCardActions(card) {
 
 function getHandCardActions(cardType) {
     switch (cardType) {
+        case 'stored_challenge':
+            return [
+                { text: 'Complete', onClick: 'completeStoredChallenge' },
+                { text: 'Veto', onClick: 'vetoStoredChallenge', class: 'btn-secondary' }
+            ];
         case 'power':
             return [
                 { text: 'Activate', onClick: 'playPowerCard' }
@@ -1324,7 +1424,6 @@ function vetoSnapCard(playerCardId) {
         .then(data => {
             if (data.success) {
                 loadHandCards();
-                setTimeout(() => refreshGameData(), 1000);
             } else {
                 alert('Failed to veto snap card: ' + data.message);
             }
@@ -1350,7 +1449,6 @@ function vetoSpicyCard(playerCardId) {
         .then(data => {
             if (data.success) {
                 loadHandCards();
-                setTimeout(() => refreshGameData(), 1000);
             } else {
                 alert('Failed to veto spicy card: ' + data.message);
             }
@@ -1419,6 +1517,9 @@ function updateHandSlots() {
     // Update hand count
     const totalCards = handCards.reduce((sum, card) => sum + card.quantity, 0);
     if (handCountEl) handCountEl.textContent = totalCards;
+
+    // Update app badge
+    updateAppBadge(totalCards);
     
     // Fill slots with cards
     let slotIndex = 0;
@@ -1437,6 +1538,7 @@ function updateHandSlots() {
 
 function createHandCardHTML(card, slotIndex) {
     const cardTypeIcons = {
+        'stored_challenge': 'fa-flag-checkered',
         'power': 'fa-star',
         'snap': 'fa-camera-retro',
         'spicy': 'fa-pepper-hot'
@@ -3295,8 +3397,11 @@ window.enableNotificationsFromModal = enableNotificationsFromModal;
 // Card action functions
 window.completeChallenge = completeChallenge;
 window.vetoChallenge = vetoChallenge;
+window.completeStoredChallenge = completeStoredChallenge;
+window.vetoStoredChallenge = vetoStoredChallenge;
 window.activateCurse = activateCurse;
 window.claimPower = claimPower;
+window.activatePower = activatePower;
 window.discardPower = discardPower;
 window.winBattle = winBattle;
 window.loseBattle = loseBattle;
