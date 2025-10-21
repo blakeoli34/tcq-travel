@@ -90,6 +90,7 @@ $(document).ready(function() {
         refreshGameData();
         checkGameStatus();
         updateCurseTimers();
+        loadHandCards();
         updateCardModifiers();
         checkForDeckPeek();
         checkDeckEmpty();
@@ -881,10 +882,19 @@ function addBadgeToCard(cardElement, modifier) {
     
     const badge = document.createElement('div');
     badge.className = `modifier-badge ${modifier.type}`;
-    badge.innerHTML = `
-        <i class="fa-solid ${modifier.type === 'curse' ? 'fa-skull-crossbones' : 'fa-star'}"></i>
-        ${modifier.card_name}
-    `;
+    
+    // Handle veto_modify badges
+    if (modifier.veto_modify && modifier.veto_modify !== 'none') {
+        badge.innerHTML = `
+            <i class="fa-solid ${modifier.type === 'curse' ? 'fa-skull-crossbones' : 'fa-star'}"></i>
+            ${modifier.card_name}
+        `;
+    } else {
+        badge.innerHTML = `
+            <i class="fa-solid ${modifier.type === 'curse' ? 'fa-skull-crossbones' : 'fa-star'}"></i>
+            ${modifier.card_name}
+        `;
+    }
     
     cardElement.style.position = 'relative';
     cardElement.appendChild(badge);
@@ -1746,6 +1756,9 @@ function checkDeckEmpty() {
 }
 
 function showDeckEmptyOverlay() {
+    // Don't show if in veto wait (wait has priority)
+    if (isVetoWaiting) return;
+    
     const container = document.querySelector('.daily-deck-container');
     if (!container) return;
     
@@ -1992,10 +2005,9 @@ function setScorebugWidth() {
 
 function toggleScoreBugExpanded() {
     const scoreBug = document.getElementById('scoreBug');
-    const expandIcon = document.getElementById('expandIcon');
     const expandedContent = document.querySelector('.score-bug-expanded-content');
     
-    if (!scoreBug || !expandIcon || !expandedContent) return;
+    if (!scoreBug || !expandedContent) return;
     
     const isExpanded = scoreBug.classList.contains('expanded');
     
@@ -2006,14 +2018,12 @@ function toggleScoreBugExpanded() {
         const contentHeight = expandedContent.scrollHeight;
         scoreBug.style.height = `${120 + contentHeight}px`;
         
-        expandIcon.className = 'fa-solid fa-chevron-down';
         loadAwardsInfo();
         setOverlayActive(true);
         scoreBugExpanded = true;
     } else {
         scoreBug.classList.remove('expanded');
         scoreBug.style.height = '';
-        expandIcon.className = 'fa-solid fa-chevron-up';
         setOverlayActive(false);
         scoreBugExpanded = false;
     }
@@ -2169,29 +2179,14 @@ function animateScoreChange(element, newScore) {
     flyout.className = 'score-flyout';
     flyout.textContent = (scoreDiff > 0 ? '+' : '') + scoreDiff;
     flyout.style.cssText = `
-        position: absolute;
-        bottom: 10px;
         ${isCurrentPlayer ? 'right: 20px;' : 'left: 20px;'}
-        font-size: 24px;
-        font-weight: 900;
-        color: #3c3c3c;
-        pointer-events: none;
-        z-index: 1001;
-        opacity: 0;
     `;
     scoreBug.appendChild(flyout);
     
     // Animate flyout
     setTimeout(() => {
-        flyout.style.transition = 'all 2000ms cubic-bezier(0.25, 0.46, 0.45, 0.94)';
-        flyout.style.opacity = '1';
-        flyout.style.transform = 'translateY(-120px)';
-        
-        setTimeout(() => {
-            flyout.style.opacity = '0';
-            setTimeout(() => flyout.remove(), 300);
-        }, 1500);
-    }, 10);
+        flyout.remove();
+    }, 2200);
     
     // Animate score element with 3D rotation
     element.classList.add('animate');
@@ -3290,6 +3285,7 @@ function updateDebugPanel() {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
+            // Update deck counts
             const countsDiv = document.getElementById('debugDeckCounts');
             if (countsDiv) {
                 countsDiv.innerHTML = `
@@ -3310,6 +3306,25 @@ function updateDebugPanel() {
                         <span class="debug-value">${data.total.battle}</span>
                     </div>
                 `;
+            }
+            
+            // Update deck breakdown
+            const breakdownDiv = document.getElementById('debugDeckBreakdown');
+            if (breakdownDiv && data.deck_breakdown) {
+                let html = `<div class="debug-row"><strong>Total: ${data.deck_breakdown.total} cards</strong></div>`;
+                
+                let currentCategory = '';
+                data.deck_breakdown.cards.forEach(card => {
+                    if (card.card_category !== currentCategory) {
+                        currentCategory = card.card_category;
+                        html += `<div class="debug-row" style="margin-top: 10px;"><strong>${currentCategory.charAt(0).toUpperCase() + currentCategory.slice(1)} Cards:</strong></div>`;
+                    }
+                    html += `<div class="debug-row" style="margin-left: 15px;">
+                        <span class="debug-label">${card.card_name}:</span>
+                        <span class="debug-value">${card.count}</span>
+                    </div>`;
+                });
+                breakdownDiv.innerHTML = html;
             }
         }
     });

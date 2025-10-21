@@ -986,6 +986,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         case 'end_game':
             try {
                 $pdo = Config::getDatabaseConnection();
+
+                // Award challenge master bonus before ending
+                if ($gameMode === 'digital') {
+                    awardChallengeMaster($player['game_id']);
+                }
                 
                 // Get final scores before ending the game
                 $players = getGamePlayers($player['game_id']);
@@ -1005,11 +1010,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     } else {
                         $isTie = true;
                     }
-                }
-                
-                // Award challenge master bonus before ending
-                if ($gameMode === 'digital') {
-                    awardChallengeMaster($player['game_id']);
                 }
                 
                 // End the game
@@ -1117,6 +1117,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     $total[$category] = $stmt->fetchColumn() ?: 0;
                 }
                 
+                // Get today's deck breakdown
+                $timezone = new DateTimeZone('America/Indiana/Indianapolis');
+                $today = (new DateTime('now', $timezone))->format('Y-m-d');
+
+                $stmt = $pdo->prepare("
+                    SELECT c.card_name, c.card_category, COUNT(*) as count
+                    FROM daily_deck_cards ddc
+                    JOIN daily_decks dd ON ddc.deck_id = dd.id
+                    JOIN cards c ON ddc.card_id = c.id
+                    WHERE dd.game_id = ? AND dd.player_id = ? AND dd.deck_date = ?
+                    GROUP BY c.id, c.card_name, c.card_category
+                    ORDER BY 
+                        CASE c.card_category 
+                            WHEN 'challenge' THEN 1 
+                            WHEN 'curse' THEN 2 
+                            WHEN 'power' THEN 3 
+                            WHEN 'battle' THEN 4 
+                        END, 
+                        c.card_name
+                ");
+                $stmt->execute([$player['game_id'], $player['id'], $today]);
+                $deckCards = $stmt->fetchAll();
+
+                $stmt = $pdo->prepare("
+                    SELECT COUNT(*) as total
+                    FROM daily_deck_cards ddc
+                    JOIN daily_decks dd ON ddc.deck_id = dd.id
+                    WHERE dd.game_id = ? AND dd.player_id = ? AND dd.deck_date = ?
+                ");
+                $stmt->execute([$player['game_id'], $player['id'], $today]);
+                $deckTotal = $stmt->fetchColumn();
+
                 echo json_encode([
                     'success' => true,
                     'available' => [
@@ -1124,7 +1156,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                         'curse' => $available['curse_count'],
                         'power' => $available['power_count']
                     ],
-                    'total' => $total
+                    'total' => $total,
+                    'deck_breakdown' => [
+                        'total' => $deckTotal,
+                        'cards' => $deckCards
+                    ]
                 ]);
             } catch (Exception $e) {
                 echo json_encode(['success' => false]);
@@ -1890,8 +1926,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         </div>
         
         <div class="debug-section">
-            <h3>Last Generation Log</h3>
-            <div class="debug-log" id="debugLog">No log available</div>
+            <h3>Today's Deck Breakdown</h3>
+            <div id="debugDeckBreakdown">Loading...</div>
         </div>
     </div>
     <?php endif; ?>

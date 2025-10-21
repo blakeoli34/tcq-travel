@@ -1193,7 +1193,7 @@ body.cruise .background-container.cruise {
 
 .deck-empty-subtitle {
     font-size: 16px;
-    color: #ccc;
+    color: white;
     text-shadow: 0 0 10px rgba(0,0,0,0.2);
 }
 
@@ -1226,6 +1226,14 @@ body.cruise .background-container.cruise {
     height: 120px;
     width: 90% !important;
     overflow: hidden;
+}
+
+#expandIcon {
+    transition: all 0.4s ease;
+}
+
+.score-bug.expanded #expandIcon {
+    transform: scaleY(-1);
 }
 
 .score-bug-content {
@@ -1283,6 +1291,32 @@ body.cruise .background-container.cruise {
     }
     100% {
         transform: translateY(0) rotate3d(0,1,0,360deg);
+    }
+}
+
+.score-flyout {
+    position: absolute;
+    bottom: 10px;
+    font-size: 24px;
+    font-weight: 900;
+    color: #3c3c3c;
+    pointer-events: none;
+    z-index: 2001;
+    opacity: 0;
+    animation: scoreFly 2s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+}
+
+@keyframes scoreFly {
+    0% {
+        transform: translateY(0);
+        opacity: 0;
+    }
+    10% {
+        opacity: 1;
+    }
+    100% {
+        transform: translateY(-120px);
+        opacity: 0;
     }
 }
 
@@ -2036,7 +2070,8 @@ body.cruise .background-container.cruise {
         border-color: #898989;
     }
 
-    .modal-content {
+    .modal-content,
+    .score-input-container input {
         background: #171717;
         color: #e6e6e6;
     }
@@ -2054,7 +2089,8 @@ body.cruise .background-container.cruise {
     .adjust-score-section h3,
     .awards-section h3,
     .form-group label,
-    .form-group input {
+    .form-group input,
+    .score-flyout {
         color: #e2e2e2;
     }
 
@@ -2120,8 +2156,7 @@ body.cruise .background-container.cruise {
     }
 
     .iAN,
-    .game-timer,
-    .hand-count {
+    .game-timer-hand {
         background: rgba(25,25,25,0.9);
         border-color: #222;
         color: #ccc;

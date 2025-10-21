@@ -866,6 +866,9 @@ function resetGameForNewRound($gameId) {
         $stmt = $pdo->prepare("DELETE FROM completed_cards WHERE game_id = ?");
         $stmt->execute([$gameId]);
 
+        $stmt = $pdo->prepare("DELETE FROM daily_battle_card WHERE game_id = ?");
+        $stmt->execute([$gameId]);
+
         $pdo->commit();
         return ['success' => true];
         

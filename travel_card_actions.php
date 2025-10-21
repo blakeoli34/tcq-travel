@@ -113,32 +113,53 @@ function vetoChallenge($gameId, $playerId, $slotNumber) {
         
         $penalties = [];
         
-        // Apply veto penalties
-        if ($card['veto_subtract']) {
-            updateScore($gameId, $playerId, -$card['veto_subtract'], $playerId);
-            $penalties[] = "Lost {$card['veto_subtract']} points";
-        }
-        
-        if ($card['veto_steal']) {
-            $opponentId = getOpponentPlayerId($gameId, $playerId);
-            updateScore($gameId, $playerId, -$card['veto_steal'], $playerId);
-            updateScore($gameId, $opponentId, $card['veto_steal'], $playerId);
-            $penalties[] = "Lost {$card['veto_steal']} points to opponent";
-        }
-        
-        if ($card['veto_wait']) {
-            applyVetoWait($gameId, $playerId, $card['veto_wait']);
-            $penalties[] = "Cannot interact with deck for {$card['veto_wait']} minutes";
-        }
-        
-        if ($card['veto_snap']) {
-            addSnapCards($gameId, $playerId, $card['veto_snap']);
-            $penalties[] = "Drew {$card['veto_snap']} snap card(s)";
-        }
-        
-        if ($card['veto_spicy']) {
-            addSpicyCards($gameId, $playerId, $card['veto_spicy']);
-            $penalties[] = "Drew {$card['veto_spicy']} spicy card(s)";
+        // Check for veto skip effects
+        $stmt = $pdo->prepare("
+            SELECT COUNT(*) FROM active_power_effects ape
+            JOIN cards c ON ape.power_card_id = c.id
+            WHERE ape.game_id = ? AND ape.player_id = ? AND c.power_veto_modify = 'skip'
+        ");
+        $stmt->execute([$gameId, $playerId]);
+        $hasVetoSkip = $stmt->fetchColumn() > 0;
+
+        if ($hasVetoSkip) {
+            $penalties[] = "Veto penalties skipped";
+            
+            // Remove the veto skip effect
+            $stmt = $pdo->prepare("
+                DELETE ape FROM active_power_effects ape
+                JOIN cards c ON ape.power_card_id = c.id
+                WHERE ape.game_id = ? AND ape.player_id = ? AND c.power_veto_modify = 'skip'
+            ");
+            $stmt->execute([$gameId, $playerId]);
+        } else {
+            // Apply veto penalties (existing code)
+            if ($card['veto_subtract']) {
+                updateScore($gameId, $playerId, -$card['veto_subtract'], $playerId);
+                $penalties[] = "Lost {$card['veto_subtract']} points";
+            }
+            
+            if ($card['veto_steal']) {
+                $opponentId = getOpponentPlayerId($gameId, $playerId);
+                updateScore($gameId, $playerId, -$card['veto_steal'], $playerId);
+                updateScore($gameId, $opponentId, $card['veto_steal'], $playerId);
+                $penalties[] = "Lost {$card['veto_steal']} points to opponent";
+            }
+            
+            if ($card['veto_wait']) {
+                applyVetoWait($gameId, $playerId, $card['veto_wait']);
+                $penalties[] = "Cannot interact with deck for {$card['veto_wait']} minutes";
+            }
+            
+            if ($card['veto_snap']) {
+                addSnapCards($gameId, $playerId, $card['veto_snap']);
+                $penalties[] = "Drew {$card['veto_snap']} snap card(s)";
+            }
+            
+            if ($card['veto_spicy']) {
+                addSpicyCards($gameId, $playerId, $card['veto_spicy']);
+                $penalties[] = "Drew {$card['veto_spicy']} spicy card(s)";
+            }
         }
         
         // Clear slot
@@ -424,6 +445,12 @@ function claimPower($gameId, $playerId, $slotNumber) {
             ");
             $stmt->execute([$gameId, $playerId, $card['card_id']]);
         }
+
+        // Track as completed
+        $stmt = $pdo->prepare("
+            INSERT IGNORE INTO completed_cards (game_id, player_id, card_id, card_type)
+            VALUES (?, ?, ?, 'power')
+        ");
         
         // Mark slot as completed and clear it
         completeClearSlot($gameId, $playerId, $slotNumber);
@@ -514,6 +541,12 @@ function activatePowerFromSlot($gameId, $playerId, $slotNumber) {
             error_log("Created active power effect ID: $effectId for card {$card['card_id']}");
             $effects[] = "Ongoing power effect activated";
         }
+
+        // Track as completed
+        $stmt = $pdo->prepare("
+            INSERT IGNORE INTO completed_cards (game_id, player_id, card_id, card_type)
+            VALUES (?, ?, ?, 'power')
+        ");
         
         // Clear slot
         completeClearSlot($gameId, $playerId, $slotNumber);
@@ -552,6 +585,12 @@ function discardPower($gameId, $playerId, $slotNumber) {
         if (!$card) {
             return ['success' => false, 'message' => 'No power card in this slot'];
         }
+
+        // Track as completed
+        $stmt = $pdo->prepare("
+            INSERT IGNORE INTO completed_cards (game_id, player_id, card_id, card_type)
+            VALUES (?, ?, ?, 'power')
+        ");
         
         // Clear slot (card is discarded)
         clearSlot($gameId, $playerId, $slotNumber);
@@ -708,6 +747,27 @@ function getPlayerHandCount($gameId, $playerId) {
 function applyModifiersToChallenge($gameId, $playerId, $basePoints) {
     try {
         $pdo = Config::getDatabaseConnection();
+
+        // Check for active power effects with score_add that modify challenges
+        $stmt = $pdo->prepare("
+            SELECT ape.*, c.power_score_add
+            FROM active_power_effects ape
+            JOIN cards c ON ape.power_card_id = c.id
+            WHERE ape.game_id = ? AND ape.player_id = ? AND c.power_challenge_modify = 1 AND c.power_score_add > 0
+        ");
+        $stmt->execute([$gameId, $playerId]);
+        $powerEffects = $stmt->fetchAll();
+
+        // If there are power effects with score_add, use that value instead
+        if (!empty($powerEffects)) {
+            $finalPoints = $powerEffects[0]['power_score_add']; // Use the power's score_add value
+            
+            // Remove the power effect after use
+            $stmt = $pdo->prepare("DELETE FROM active_power_effects WHERE id = ?");
+            $stmt->execute([$powerEffects[0]['id']]);
+            
+            return $finalPoints;
+        }
         
         // Get active curse effects that modify challenges
         $stmt = $pdo->prepare("
@@ -1014,11 +1074,12 @@ function getActiveModifiers($gameId, $playerId) {
         $stmt = $pdo->prepare("
             SELECT c.card_name, c.power_challenge_modify as challenge_modify, 
                 c.power_snap_modify as snap_modify, c.power_spicy_modify as spicy_modify, 
-                c.skip_challenge, c.bypass_expiration, 'power' as type
+                c.skip_challenge, c.bypass_expiration, c.power_veto_modify as veto_modify, 'power' as type
             FROM active_power_effects ape
             JOIN cards c ON ape.power_card_id = c.id
             WHERE ape.game_id = ? AND ape.player_id = ? 
-            AND (c.power_challenge_modify = 1 OR c.power_snap_modify = 1 OR c.power_spicy_modify = 1 OR c.skip_challenge = 1 OR c.bypass_expiration = 1)
+            AND (c.power_challenge_modify = 1 OR c.power_snap_modify = 1 OR c.power_spicy_modify = 1 
+                OR c.skip_challenge = 1 OR c.bypass_expiration = 1 OR c.power_veto_modify != 'none')
         ");
         $stmt->execute([$gameId, $playerId]);
         $powerModifiers = $stmt->fetchAll();

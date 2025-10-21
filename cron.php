@@ -114,7 +114,7 @@ function sendDailyNotifications() {
                 
                 $result = sendPushNotification(
                     $player['fcm_token'],
-                    'Daily Deck Ready! 🎴',
+                    'Daily Deck Ready! 🚨',
                     $message
                 );
                 
@@ -159,7 +159,7 @@ function endOfDayNotification() {
         if ($player['fcm_token']) {
             sendPushNotification(
                 $player['fcm_token'],
-                'Day Ending Soon!',
+                'Game Day Ending Soon!',
                 "Only a few hours left to complete challenges today!"
             );
         }

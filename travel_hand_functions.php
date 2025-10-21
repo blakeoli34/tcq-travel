@@ -368,22 +368,43 @@ function vetoSnapSpicyCard($gameId, $playerId, $playerCardId, $cardType) {
         
         $penalties = [];
         
-        // Apply veto penalties
-        if ($card['veto_subtract']) {
-            updateScore($gameId, $playerId, -$card['veto_subtract'], $playerId);
-            $penalties[] = "Lost {$card['veto_subtract']} points";
-        }
-        
-        if ($card['veto_steal']) {
-            $opponentId = getOpponentPlayerId($gameId, $playerId);
-            updateScore($gameId, $playerId, -$card['veto_steal'], $playerId);
-            updateScore($gameId, $opponentId, $card['veto_steal'], $playerId);
-            $penalties[] = "Lost {$card['veto_steal']} points to opponent";
-        }
-        
-        if ($card['veto_wait']) {
-            applyVetoWait($gameId, $playerId, $card['veto_wait']);
-            $penalties[] = "Cannot interact with deck for {$card['veto_wait']} minutes";
+        // Check for veto skip effects
+        $stmt = $pdo->prepare("
+            SELECT COUNT(*) FROM active_power_effects ape
+            JOIN cards c ON ape.power_card_id = c.id
+            WHERE ape.game_id = ? AND ape.player_id = ? AND c.power_veto_modify = 'skip'
+        ");
+        $stmt->execute([$gameId, $playerId]);
+        $hasVetoSkip = $stmt->fetchColumn() > 0;
+
+        if ($hasVetoSkip) {
+            $penalties[] = "Veto penalties skipped";
+            
+            // Remove the veto skip effect
+            $stmt = $pdo->prepare("
+                DELETE ape FROM active_power_effects ape
+                JOIN cards c ON ape.power_card_id = c.id
+                WHERE ape.game_id = ? AND ape.player_id = ? AND c.power_veto_modify = 'skip'
+            ");
+            $stmt->execute([$gameId, $playerId]);
+        } else {
+            // Apply veto penalties (existing code)
+            if ($card['veto_subtract']) {
+                updateScore($gameId, $playerId, -$card['veto_subtract'], $playerId);
+                $penalties[] = "Lost {$card['veto_subtract']} points";
+            }
+            
+            if ($card['veto_steal']) {
+                $opponentId = getOpponentPlayerId($gameId, $playerId);
+                updateScore($gameId, $playerId, -$card['veto_steal'], $playerId);
+                updateScore($gameId, $opponentId, $card['veto_steal'], $playerId);
+                $penalties[] = "Lost {$card['veto_steal']} points to opponent";
+            }
+            
+            if ($card['veto_wait']) {
+                applyVetoWait($gameId, $playerId, $card['veto_wait']);
+                $penalties[] = "Cannot interact with deck for {$card['veto_wait']} minutes";
+            }
         }
         
         // Remove card from hand
@@ -486,32 +507,53 @@ function vetoStoredChallenge($gameId, $playerId, $playerCardId) {
         
         $penalties = [];
         
-        // Apply veto penalties
-        if ($card['veto_subtract']) {
-            updateScore($gameId, $playerId, -$card['veto_subtract'], $playerId);
-            $penalties[] = "Lost {$card['veto_subtract']} points";
-        }
-        
-        if ($card['veto_steal']) {
-            $opponentId = getOpponentPlayerId($gameId, $playerId);
-            updateScore($gameId, $playerId, -$card['veto_steal'], $playerId);
-            updateScore($gameId, $opponentId, $card['veto_steal'], $playerId);
-            $penalties[] = "Lost {$card['veto_steal']} points to opponent";
-        }
-        
-        if ($card['veto_wait']) {
-            applyVetoWait($gameId, $playerId, $card['veto_wait']);
-            $penalties[] = "Cannot interact with deck for {$card['veto_wait']} minutes";
-        }
-        
-        if ($card['veto_snap']) {
-            addSnapCards($gameId, $playerId, $card['veto_snap']);
-            $penalties[] = "Drew {$card['veto_snap']} snap card(s)";
-        }
-        
-        if ($card['veto_spicy']) {
-            addSpicyCards($gameId, $playerId, $card['veto_spicy']);
-            $penalties[] = "Drew {$card['veto_spicy']} spicy card(s)";
+        // Check for veto skip effects
+        $stmt = $pdo->prepare("
+            SELECT COUNT(*) FROM active_power_effects ape
+            JOIN cards c ON ape.power_card_id = c.id
+            WHERE ape.game_id = ? AND ape.player_id = ? AND c.power_veto_modify = 'skip'
+        ");
+        $stmt->execute([$gameId, $playerId]);
+        $hasVetoSkip = $stmt->fetchColumn() > 0;
+
+        if ($hasVetoSkip) {
+            $penalties[] = "Veto penalties skipped";
+            
+            // Remove the veto skip effect
+            $stmt = $pdo->prepare("
+                DELETE ape FROM active_power_effects ape
+                JOIN cards c ON ape.power_card_id = c.id
+                WHERE ape.game_id = ? AND ape.player_id = ? AND c.power_veto_modify = 'skip'
+            ");
+            $stmt->execute([$gameId, $playerId]);
+        } else {
+            // Apply veto penalties (existing code)
+            if ($card['veto_subtract']) {
+                updateScore($gameId, $playerId, -$card['veto_subtract'], $playerId);
+                $penalties[] = "Lost {$card['veto_subtract']} points";
+            }
+            
+            if ($card['veto_steal']) {
+                $opponentId = getOpponentPlayerId($gameId, $playerId);
+                updateScore($gameId, $playerId, -$card['veto_steal'], $playerId);
+                updateScore($gameId, $opponentId, $card['veto_steal'], $playerId);
+                $penalties[] = "Lost {$card['veto_steal']} points to opponent";
+            }
+            
+            if ($card['veto_wait']) {
+                applyVetoWait($gameId, $playerId, $card['veto_wait']);
+                $penalties[] = "Cannot interact with deck for {$card['veto_wait']} minutes";
+            }
+            
+            if ($card['veto_snap']) {
+                addSnapCards($gameId, $playerId, $card['veto_snap']);
+                $penalties[] = "Drew {$card['veto_snap']} snap card(s)";
+            }
+            
+            if ($card['veto_spicy']) {
+                addSpicyCards($gameId, $playerId, $card['veto_spicy']);
+                $penalties[] = "Drew {$card['veto_spicy']} spicy card(s)";
+            }
         }
         
         // Remove from hand
@@ -723,6 +765,27 @@ function getPlayerHand($gameId, $playerId) {
 function applySnapSpicyModifiers($gameId, $playerId, $basePoints, $cardType) {
     try {
         $pdo = Config::getDatabaseConnection();
+
+        // Check for active power effects with score_add that modify this card type
+        $stmt = $pdo->prepare("
+            SELECT ape.*, c.power_score_add
+            FROM active_power_effects ape
+            JOIN cards c ON ape.power_card_id = c.id
+            WHERE ape.game_id = ? AND ape.player_id = ? AND c.power_{$cardType}_modify = 1 AND c.power_score_add > 0
+        ");
+        $stmt->execute([$gameId, $playerId]);
+        $powerEffects = $stmt->fetchAll();
+
+        // If there are power effects with score_add, use that value instead
+        if (!empty($powerEffects)) {
+            $finalPoints = $powerEffects[0]['power_score_add']; // Use the power's score_add value
+            
+            // Remove the power effect after use
+            $stmt = $pdo->prepare("DELETE FROM active_power_effects WHERE id = ?");
+            $stmt->execute([$powerEffects[0]['id']]);
+            
+            return $finalPoints;
+        }
         
         // Get active power/curse effects that modify snap/spicy cards
         $modifyField = $cardType . '_modify';

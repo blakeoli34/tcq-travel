@@ -68,10 +68,10 @@ function generateDailyDeck($gameId, $playerId) {
             $curseCards = selectRandomCardsForPlayer($gameId, $playerId, 'curse', $cursePerDay, $availableCards['used_card_ids']);
             $powerCards = selectRandomCardsForPlayer($gameId, $playerId, 'power', $powerPerDay, $availableCards['used_card_ids']);
 
-            // Select ONE battle card for the entire game today
+            // Get or create battle card for today
             $stmt = $pdo->prepare("
-                SELECT id FROM daily_battle_card 
-                WHERE game_id = ? AND battle_date = ?
+                SELECT card_id FROM daily_battle_card 
+                WHERE game_id = ? AND battle_date = ? AND drawn_by_player_id IS NULL
             ");
             $stmt->execute([$gameId, $today]);
             $battleCardId = $stmt->fetchColumn();
@@ -90,7 +90,7 @@ function generateDailyDeck($gameId, $playerId) {
                     $stmt->execute([$gameId, $today, $battleCardId]);
                 }
             } else {
-                // Use the existing battle card
+                // Use the existing battle card (still available)
                 $stmt = $pdo->prepare("SELECT * FROM cards WHERE id = ?");
                 $stmt->execute([$battleCardId]);
                 $battleCards = [$stmt->fetch()];
