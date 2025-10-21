@@ -174,7 +174,7 @@ function vetoChallenge($gameId, $playerId, $slotNumber) {
         // Track as completed
         $stmt = $pdo->prepare("
             INSERT IGNORE INTO completed_cards (game_id, player_id, card_id, card_type)
-            VALUES (?, ?, ?, 'battle')
+            VALUES (?, ?, ?, 'challenge')
         ");
         $stmt->execute([$gameId, $playerId, $card['card_id']]);
 
@@ -1142,6 +1142,13 @@ function storeChallengeCard($gameId, $playerId, $slotNumber) {
             VALUES (?, ?, ?, 'stored_challenge', 1, ?)
         ");
         $stmt->execute([$gameId, $playerId, $card['card_id'], $card['card_points']]);
+
+        // Track as completed
+        $stmt = $pdo->prepare("
+            INSERT IGNORE INTO completed_cards (game_id, player_id, card_id, card_type)
+            VALUES (?, ?, ?, 'challenge')
+        ");
+        $stmt->execute([$gameId, $playerId, $card['card_id']]);
         
         // Clear slot
         clearSlot($gameId, $playerId, $slotNumber);
