@@ -110,6 +110,12 @@ function vetoChallenge($gameId, $playerId, $slotNumber) {
         if (!$card) {
             throw new Exception("No challenge card in this slot");
         }
+
+        // Check if veto would draw cards but hand is full
+        $handCount = getPlayerHandCount($gameId, $playerId);
+        if ($handCount >= 6 && ($card['veto_snap'] || $card['veto_spicy'])) {
+            throw new Exception("Cannot veto: hand is full and this would draw additional cards");
+        }
         
         $penalties = [];
         
@@ -341,15 +347,11 @@ function activateCurse($gameId, $playerId, $slotNumber) {
         // Create active curse effect only if not instant
         $effectId = null;
         if (!$curseResult['is_instant']) {
-            $effectId = addActiveCurseEffect($gameId, $playerId, $card['card_id'], $card, $slotNumber, $timerId);
+            $effectId = addActiveCurseEffect($gameId, $playerId, $card['card_id'], $card, $slotNumber, $curseResult['timer_id'] ?? null);
         }
 
-        $stmt = $pdo->prepare("
-            UPDATE daily_deck_slots 
-            SET curse_activated = TRUE
-            WHERE game_id = ? AND player_id = ? AND deck_date = ? AND slot_number = ?
-        ");
-        $stmt->execute([$gameId, $playerId, $today, $slotNumber]);
+        // Always clear the slot after activating curse
+        completeClearSlot($gameId, $playerId, $slotNumber);
 
         // Track as completed
         $stmt = $pdo->prepare("
@@ -451,6 +453,7 @@ function claimPower($gameId, $playerId, $slotNumber) {
             INSERT IGNORE INTO completed_cards (game_id, player_id, card_id, card_type)
             VALUES (?, ?, ?, 'power')
         ");
+        $stmt->execute([$gameId, $playerId, $card['card_id']]);
         
         // Mark slot as completed and clear it
         completeClearSlot($gameId, $playerId, $slotNumber);
@@ -547,6 +550,7 @@ function activatePowerFromSlot($gameId, $playerId, $slotNumber) {
             INSERT IGNORE INTO completed_cards (game_id, player_id, card_id, card_type)
             VALUES (?, ?, ?, 'power')
         ");
+        $stmt->execute([$gameId, $playerId, $card['card_id']]);
         
         // Clear slot
         completeClearSlot($gameId, $playerId, $slotNumber);
@@ -591,6 +595,7 @@ function discardPower($gameId, $playerId, $slotNumber) {
             INSERT IGNORE INTO completed_cards (game_id, player_id, card_id, card_type)
             VALUES (?, ?, ?, 'power')
         ");
+        $stmt->execute([$gameId, $playerId, $card['card_id']]);
         
         // Clear slot (card is discarded)
         clearSlot($gameId, $playerId, $slotNumber);
@@ -907,7 +912,7 @@ function processCurseCard($gameId, $playerId, $card) {
         $effects[] = "Complete a spicy card to clear this curse";
     }
     
-    return ['effects' => $effects, 'is_instant' => $isInstant];
+    return ['effects' => $effects, 'is_instant' => $isInstant, 'timer_id' => $timerId];
 }
 
 function addActiveCurseEffect($gameId, $playerId, $cardId, $card, $slotNumber = null, $timerId = null) {

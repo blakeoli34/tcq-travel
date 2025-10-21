@@ -952,21 +952,6 @@ body.cruise .background-container.cruise {
     pointer-events: none;
 }
 
-.daily-slot.curse-activated {
-    animation: cursePulse 2s infinite ease-in-out;
-}
-
-@keyframes cursePulse {
-    0%, 100% {
-        transform: scale(1);
-        background: inherit;
-    }
-    50% {
-        transform: scale(0.975);
-        background: #67597A;
-    }
-}
-
 .slot-content {
     width: 100%;
     height: 100%;
@@ -1490,6 +1475,15 @@ body.cruise .background-container.cruise {
     text-transform: uppercase;
     letter-spacing: 1px;
     flex: 0 0 auto;
+    text-align: center;
+    display: flex;
+    align-items: center;
+    flex-flow: row nowrap;
+    min-width: 114px;
+}
+
+.award-label.master {
+    display: block;
 }
 
 .award-icon {
@@ -1511,9 +1505,36 @@ body.cruise .background-container.cruise {
     font-size: 14px;
     font-weight: 700;
     color: #333;
+    text-align: center;
+}
+
+.award-badge {
+    font-size: 10px;
+    padding: 2px 4px;
+    background: #3c3c3c;
+    border-radius: 3px;
+    font-weight: 200;
+    color: #e2e2e2;
+}
+
+.award-badge:first-child {
+    margin-right: 10px;
+}
+
+.award-badge:last-child {
+    margin-left: 10px;
+}
+
+.award-label.master .award-badge {
+    display: inline-block;
+    margin: 10px auto !important;
 }
 
 @media (prefers-color-scheme: dark) {
+    .award-badge {
+        background: #e2e2e2;
+        color: #3c3c3c;
+    }
     .award-label {
         color: #999;
     }
@@ -2012,22 +2033,26 @@ body.cruise .background-container.cruise {
     margin-bottom: 15px;
 }
 
+.daily-slot.loading .card-content {
+    opacity: 0;
+}
+
 .card-draw-animation {
-    animation: cardDraw 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+    animation: cardDraw 1s ease-in-out forwards;
     transform-origin: center center;
 }
 
 @keyframes cardDraw {
     0% {
-        transform: scale(2) translateY(-50px);
-        opacity: 0.8;
+        transform: scale(0);
+        opacity: 0.5;
     }
-    50% {
-        transform: scale(1.2) translateY(-20px);
+    50%, 90% {
+        transform: scale(1.2);
         opacity: 0.9;
     }
-    100% {
-        transform: scale(1) translateY(0);
+    70%, 100% {
+        transform: scale(1);
         opacity: 1;
     }
 }

@@ -10,6 +10,7 @@ let handOverlayOpen = false;
 let currentHandDeck = 'snap';
 let handCards = [];
 let scoreBugExpanded = false;
+let refreshInterval = null;
 
 // Sound management
 let actionSound = new Audio('data:audio/mpeg;base64,SUQzBAAAAAABEVRYWFgAAAAtAAADY29tbWVudABCaWdTb3VuZEJhbmsuY29tIC8gTGFTb25vdGhlcXVlLm9yZwBURU5DAAAAHQAAA1N3aXRjaCBQbHVzIMKpIE5DSCBTb2Z0d2FyZQBUSVQyAAAABgAAAzIyMzUAVFNTRQAAAA8AAANMYXZmNTcuODMuMTAwAAAAAAAAAAAAAAD/80DEAAAAA0gAAAAATEFNRTMuMTAwVVVVVVVVVVVVVUxBTUUzLjEwMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zQsRbAAADSAAAAABVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zQMSkAAADSAAAAABVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV');
@@ -77,31 +78,8 @@ $(document).ready(function() {
         setScorebugWidth();
         $('.score-bug, .game-timer-hand').addClass('visible');
     }, 500);
-    
-    // Periodic updates
-    setInterval(() => {
-        if (!isVetoWaiting && !checkDowntime()) {
-            loadDailyDeck();
-            updateSlotActionsForModifiers();
-        }
-        checkVetoWait();
-        checkCurseBlock();
-        updateStatusEffects();
-        refreshGameData();
-        checkGameStatus();
-        updateCurseTimers();
-        loadHandCards();
-        updateCardModifiers();
-        checkForDeckPeek();
-        checkDeckEmpty();
-        updateDailyDeckCount();
-        // Cleanup orphaned curse slots
-        fetch('game.php', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: 'action=cleanup_expired_effects'
-        });
-    }, 5000);
+
+    startRefreshInterval();
     
     // Setup polling for waiting screens
     setupWaitingScreenPolling();
@@ -116,23 +94,34 @@ $(document).ready(function() {
     // Touch gesture handling for hand overlay
     let touchStartY = 0;
     let touchEndY = 0;
+    let isScrolling = false;
 
     $(document).on('touchstart', function(e) {
-        // Don't handle if touching the score bug
-        if ($(e.target).closest('#scoreBug, #scoreBugExpanded').length > 0) {
+        // Don't handle if touching the score bug or scrollable areas
+        if ($(e.target).closest('#scoreBug, #scoreBugExpanded, #debugPanel, .daily-deck-container').length > 0) {
             return;
         }
         touchStartY = e.originalEvent.changedTouches[0].screenY;
+        isScrolling = false;
+    });
+
+    $(document).on('touchmove', function(e) {
+        // Check if we're scrolling within debug panel or daily deck container
+        if ($(e.target).closest('#debugPanel, .daily-deck-container').length > 0) {
+            isScrolling = true;
+        }
     });
 
     $(document).on('touchend', function(e) {
-        // Don't handle if touching the score bug
-        if ($(e.target).closest('#scoreBug, #scoreBugExpanded').length > 0) {
+        // Don't handle if touching the score bug, scrollable areas, or if we detected scrolling
+        if ($(e.target).closest('#scoreBug, #scoreBugExpanded, #debugPanel, .daily-deck-container').length > 0 || isScrolling) {
+            isScrolling = false;
             return;
         }
         
         touchEndY = e.originalEvent.changedTouches[0].screenY;
         handleSwipe();
+        isScrolling = false;
     });
 
     function handleSwipe() {
@@ -153,6 +142,48 @@ $(document).ready(function() {
         }
     }
 });
+
+function stopRefreshInterval() {
+    if (refreshInterval) {
+        clearInterval(refreshInterval);
+        refreshInterval = null;
+    }
+}
+
+function startRefreshInterval() {
+    if (!refreshInterval) {
+        refreshInterval = setInterval(() => {
+            if (!isVetoWaiting && !checkDowntime()) {
+                loadDailyDeck();
+                updateSlotActionsForModifiers();
+            }
+            checkVetoWait();
+            checkCurseBlock();
+            updateStatusEffects();
+            refreshGameData();
+            checkGameStatus();
+            updateCurseTimers();
+            loadHandCards();
+            updateCardModifiers();
+            checkForDeckPeek();
+            checkDeckEmpty();
+            updateDailyDeckCount();
+            fetch('game.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: 'action=cleanup_expired_effects'
+            });
+        }, 5000);
+    }
+}
+
+function forceRefreshOnce() {
+    stopRefreshInterval();
+    setTimeout(() => {
+        refreshGameData();
+        setTimeout(startRefreshInterval, 1000); // Restart after 1 second
+    }, 2000);
+}
 
 function checkGameStatus() {
     if (!gameData || gameData.gameStatus !== 'active') return;
@@ -200,6 +231,7 @@ function loadDailyDeck() {
                 dailyDeckData = data;
                 dailyDeckData.remainingCards = data.remaining_cards || 0;
                 updateDailyDeckDisplay(data.slots);
+                setTimeout(() => updateCardModifiers(), 100);
                 updateDeckMessage(data.slots);
             }
         } else {
@@ -497,14 +529,15 @@ function animateCardDraw(slotElement) {
         cardContent.classList.add('card-draw-animation');
         setTimeout(() => {
             cardContent.classList.remove('card-draw-animation');
-        }, 600);
+            slotElement.classList.remove('loading');
+        }, 1200);
     }
 }
 
 function animateCardComplete(slotElement) {
     const cardContent = slotElement.querySelector('.card-content, .hand-slot-card');
     if (cardContent) {
-        cardContent.style.transition = 'all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1)';
+        cardContent.style.transition = 'all 1s cubic-bezier(0.34, 1.56, 0.64, 1)';
         cardContent.style.transform = 'scale(0)';
         cardContent.style.opacity = '0';
     }
@@ -525,7 +558,7 @@ function animateHandCardIn(slotElement) {
         cardContent.classList.add('card-draw-animation');
         setTimeout(() => {
             cardContent.classList.remove('card-draw-animation');
-        }, 600);
+        }, 1200);
     }
 }
 
@@ -686,13 +719,18 @@ function drawToSlot(slotNumber) {
     .then(data => {
         if (data.success) {
             playSoundIfEnabled('/card-drawn.m4r');
+            // Add loading class to prevent flash
+            const slotEl = document.querySelector(`.daily-slot[data-slot="${slotNumber}"]`);
+            if (slotEl) slotEl.classList.add('loading');
             loadDailyDeck();
             updateDailyDeckCount();
+            setTimeout(() => updateCardModifiers(), 200);
             
-            // Animate the slot after deck loads
             setTimeout(() => {
                 const slotEl = document.querySelector(`.daily-slot[data-slot="${slotNumber}"]`);
-                if (slotEl) animateCardDraw(slotEl);
+                if (slotEl) {
+                    animateCardDraw(slotEl);
+                }
             }, 100);
         } else {
             alert('Failed to draw card: ' + (data.message || 'Unknown error'));
@@ -905,6 +943,7 @@ function completeChallenge(slotNumber) {
     
     playSoundIfEnabled('/card-completed.m4r');
     animateCardComplete(slotEl);
+    forceRefreshOnce();
     
     setTimeout(() => {
         fetch('game.php', {
@@ -920,7 +959,7 @@ function completeChallenge(slotNumber) {
                 alert('Failed to complete challenge: ' + data.message);
             }
         });
-    }, 500);
+    }, 1000);
 }
 
 function vetoChallenge(slotNumber) {
@@ -939,6 +978,7 @@ function vetoChallenge(slotNumber) {
         .then(data => {
             if (data.success) {
                 loadDailyDeck();
+                forceRefreshOnce();
             } else {
                 alert('Failed to veto challenge: ' + data.message);
             }
@@ -952,6 +992,7 @@ function completeStoredChallenge(playerCardId) {
     if (cardSlot) {
         playSoundIfEnabled('/card-completed.m4r');
         animateCardComplete(cardSlot);
+        forceRefreshOnce();
     }
     
     setTimeout(() => {
@@ -964,12 +1005,11 @@ function completeStoredChallenge(playerCardId) {
         .then(data => {
             if (data.success) {
                 loadHandCards();
-                setTimeout(() => refreshGameData(), 500);
             } else {
                 alert('Failed to complete challenge: ' + data.message);
             }
         });
-    }, 500);
+    }, 1000);
 }
 
 function vetoStoredChallenge(playerCardId) {
@@ -990,7 +1030,7 @@ function vetoStoredChallenge(playerCardId) {
         .then(data => {
             if (data.success) {
                 loadHandCards();
-                setTimeout(() => refreshGameData(), 1000);
+                forceRefreshOnce();
             } else {
                 alert('Failed to veto challenge: ' + data.message);
             }
@@ -1091,6 +1131,7 @@ function completeBattle(slotNumber, isWinner) {
     
     playSoundIfEnabled('/card-completed.m4r');
     animateCardComplete(slotEl);
+    forceRefreshOnce();
     
     setTimeout(() => {
         fetch('game.php', {
@@ -1106,7 +1147,7 @@ function completeBattle(slotNumber, isWinner) {
                 alert('Failed to complete battle: ' + data.message);
             }
         });
-    }, 500);
+    }, 1000);
 }
 
 // ========================================
@@ -1162,7 +1203,13 @@ function loadHandCards() {
     .then(data => {
         if (data.success) {
             handCards = data.hand;
-            updateHandSlots();
+            
+            // Only update hand slots if none are expanded
+            const hasExpandedSlots = document.querySelectorAll('.hand-slot.expanded').length > 0;
+            if (!hasExpandedSlots) {
+                updateHandSlots();
+            }
+            
             updateDeckCounts();
         }
     });
@@ -1384,7 +1431,7 @@ function completeSnapCard(playerCardId) {
                 alert('Failed to complete snap card: ' + data.message);
             }
         });
-    }, 500);
+    }, 1000);
 }
 
 function completeSpicyCard(playerCardId) {
@@ -1413,7 +1460,7 @@ function completeSpicyCard(playerCardId) {
                 alert('Failed to complete spicy card: ' + data.message);
             }
         });
-    }, 500);
+    }, 1000);
 }
 
 function vetoSnapCard(playerCardId) {
@@ -2046,39 +2093,50 @@ function loadAwardsInfo() {
 function updateAwardsDisplay(data) {
     // Player snap
     const playerSnapEl = document.getElementById('playerSnapProgress');
-    if (playerSnapEl) {
+    const playerSnapBadge = document.getElementById('playerSnapBadge');
+    if (playerSnapEl && playerSnapBadge) {
         playerSnapEl.textContent = data.player_snap_next ? 
             `${data.player_snap_next.cards_needed} to go` : 'MAX';
+        playerSnapBadge.textContent = data.player_snap_next ? 
+            `+${data.player_snap_next.points_reward}` : '+0';
     }
     
     // Opponent snap
     const opponentSnapEl = document.getElementById('opponentSnapProgress');
-    if (opponentSnapEl) {
+    const opponentSnapBadge = document.getElementById('opponentSnapBadge');
+    if (opponentSnapEl && opponentSnapBadge) {
         opponentSnapEl.textContent = data.opponent_snap_next ? 
             `${data.opponent_snap_next.cards_needed} to go` : 'MAX';
+        opponentSnapBadge.textContent = data.opponent_snap_next ? 
+            `+${data.opponent_snap_next.points_reward}` : '+0';
     }
     
     // Player spicy
     const playerSpicyEl = document.getElementById('playerSpicyProgress');
-    if (playerSpicyEl) {
+    const playerSpicyBadge = document.getElementById('playerSpicyBadge');
+    if (playerSpicyEl && playerSpicyBadge) {
         playerSpicyEl.textContent = data.player_spicy_next ? 
             `${data.player_spicy_next.cards_needed} to go` : 'MAX';
+        playerSpicyBadge.textContent = data.player_spicy_next ? 
+            `+${data.player_spicy_next.points_reward}` : '+0';
     }
     
     // Opponent spicy
     const opponentSpicyEl = document.getElementById('opponentSpicyProgress');
-    if (opponentSpicyEl) {
+    const opponentSpicyBadge = document.getElementById('opponentSpicyBadge');
+    if (opponentSpicyEl && opponentSpicyBadge) {
         opponentSpicyEl.textContent = data.opponent_spicy_next ? 
             `${data.opponent_spicy_next.cards_needed} to go` : 'MAX';
+        opponentSpicyBadge.textContent = data.opponent_spicy_next ? 
+            `+${data.opponent_spicy_next.points_reward}` : '+0';
     }
     
-    // Player challenge count
+    // Challenge master - keep as before
     const playerChallengeEl = document.getElementById('playerChallengeCount');
     if (playerChallengeEl && data.player_stats) {
         playerChallengeEl.textContent = data.player_stats.challenges_completed;
     }
     
-    // Opponent challenge count
     const opponentChallengeEl = document.getElementById('opponentChallengeCount');
     if (opponentChallengeEl && data.opponent_stats) {
         opponentChallengeEl.textContent = data.opponent_stats.challenges_completed;

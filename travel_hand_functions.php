@@ -504,6 +504,12 @@ function vetoStoredChallenge($gameId, $playerId, $playerCardId) {
         if (!$card) {
             throw new Exception("Stored challenge not found in hand");
         }
+
+        // Check if veto would draw cards but hand is full
+        $handCount = getPlayerHandCount($gameId, $playerId);
+        if ($handCount >= 6 && ($card['veto_snap'] || $card['veto_spicy'])) {
+            throw new Exception("Cannot veto: hand is full and this would draw additional cards");
+        }
         
         $penalties = [];
         
@@ -750,7 +756,7 @@ function getPlayerHand($gameId, $playerId) {
             FROM player_cards pc
             JOIN cards c ON pc.card_id = c.id
             WHERE pc.game_id = ? AND pc.player_id = ? AND pc.card_type IN ('power', 'snap', 'spicy', 'stored_challenge')
-            ORDER BY pc.card_type, c.card_name
+            ORDER BY pc.id
         ");
         $stmt->execute([$gameId, $playerId]);
         

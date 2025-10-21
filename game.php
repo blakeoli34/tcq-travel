@@ -1626,7 +1626,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                                     </div>
                                     <div class="award-count" id="opponentSnapProgress">-</div>
                                 </div>
-                                <div class="award-label">SNAP</div>
+                                <div class="award-label"><span class="award-badge" id="opponentSnapBadge"></span>SNAP<span class="award-badge" id="playerSnapBadge"></span></div>
                                 <div class="award-column current">
                                     <div class="award-icon snap-award">
                                         <i class="fa-solid fa-camera-retro"></i>
@@ -1643,7 +1643,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                                     </div>
                                     <div class="award-count" id="opponentSpicyProgress">-</div>
                                 </div>
-                                <div class="award-label">SPICY</div>
+                                <div class="award-label"><span class="award-badge" id="opponentSpicyBadge"></span>SPICY<span class="award-badge" id="playerSpicyBadge"></span></div>
                                 <div class="award-column current">
                                     <div class="award-icon spicy-award">
                                         <i class="fa-solid fa-pepper-hot"></i>
@@ -1660,7 +1660,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                                     </div>
                                     <div class="award-count" id="opponentChallengeCount">-</div>
                                 </div>
-                                <div class="award-label">MASTER</div>
+                                <div class="award-label master">MASTER<br><span class="award-badge">+25</span></div>
                                 <div class="award-column current">
                                     <div class="award-icon challenge-master">
                                         <i class="fa-solid fa-trophy"></i>
