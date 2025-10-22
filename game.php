@@ -683,6 +683,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             ]);
             exit;
 
+        case 'get_veto_wait_status':
+            $target = $_POST['target'] ?? 'player';
+            $playerId = ($target === 'opponent') ? $opponentPlayer['id'] : $currentPlayer['id'];
+            
+            $stmt = $pdo->prepare("SELECT veto_wait_until FROM players WHERE id = ?");
+            $stmt->execute([$playerId]);
+            $waitUntil = $stmt->fetchColumn();
+            
+            echo json_encode([
+                'success' => true,
+                'wait_until' => $waitUntil,
+                'has_wait' => $waitUntil && strtotime($waitUntil) > time()
+            ]);
+            exit;
+
         case 'check_curse_dice':
             $effectId = intval($_POST['effect_id']);
             $die1 = intval($_POST['die1']);
@@ -1625,7 +1640,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 </div>
                 
                 <div class="veto-wait-overlay" id="vetoWaitOverlay" style="display: none;">
-                    <div class="veto-message">Wait to Play</div>
+                    <div class="veto-message">Wait Penalty Ends in</div>
                     <div class="veto-countdown" id="vetoCountdown">0:00</div>
                 </div>
 
@@ -1635,7 +1650,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 </div>
 
                 <div class="daily-deck-count" id="dailyDeckCount" style="display: none;">
-                    <span id="deckCountText">Cards remaining: 0</span>
+                    <span id="deckCountText">Cards Remaining: 0</span>
                 </div>
                 
                 <div class="daily-slots" id="dailySlots">
@@ -1789,6 +1804,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                             <!-- Status effect icons will be added here -->
                         </div>
                     </div>
+                </div>
+                <div class="status-effect-slideout" id="statusEffectSlideout">
+                    <div class="slideout-title" id="slideoutTitle"></div>
+                    <div class="slideout-content" id="slideoutContent"></div>
                 </div>
             </div>
 

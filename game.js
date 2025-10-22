@@ -11,6 +11,8 @@ let currentHandDeck = 'snap';
 let handCards = [];
 let scoreBugExpanded = false;
 let refreshInterval = null;
+let slideoutTimeout = null;
+let waitCountdownInterval = null;
 
 // Sound management
 let actionSound = new Audio('data:audio/mpeg;base64,SUQzBAAAAAABEVRYWFgAAAAtAAADY29tbWVudABCaWdTb3VuZEJhbmsuY29tIC8gTGFTb25vdGhlcXVlLm9yZwBURU5DAAAAHQAAA1N3aXRjaCBQbHVzIMKpIE5DSCBTb2Z0d2FyZQBUSVQyAAAABgAAAzIyMzUAVFNTRQAAAA8AAANMYXZmNTcuODMuMTAwAAAAAAAAAAAAAAD/80DEAAAAA0gAAAAATEFNRTMuMTAwVVVVVVVVVVVVVUxBTUUzLjEwMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zQsRbAAADSAAAAABVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zQMSkAAADSAAAAABVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV');
@@ -234,7 +236,7 @@ let currentDeckState = null;
 function loadDailyDeck() {
     // Don't load daily deck if game isn't active
     if (!gameData || gameData.gameStatus !== 'active') {
-        return;
+        return Promise.resolve();
     }
     
     fetch('game.php', {
@@ -498,7 +500,7 @@ function updateDailyDeckCount() {
             const countEl = document.getElementById('deckCountText');
             const containerEl = document.getElementById('dailyDeckCount');
             if (countEl && containerEl) {
-                countEl.textContent = `Cards remaining: ${data.remaining}`;
+                countEl.textContent = `Cards Remaining: ${data.remaining}`;
                 containerEl.style.display = data.remaining > 0 ? 'block' : 'none';
             }
         }
@@ -745,15 +747,14 @@ function drawToSlot(slotNumber) {
             const slotEl = document.querySelector(`.daily-slot[data-slot="${slotNumber}"]`);
             if (slotEl) slotEl.classList.add('loading');
             loadDailyDeck();
-            updateDailyDeckCount();
-            setTimeout(() => updateCardModifiers(), 200);
-            
             setTimeout(() => {
                 const slotEl = document.querySelector(`.daily-slot[data-slot="${slotNumber}"]`);
-                if (slotEl) {
+                if (slotEl && slotEl.classList.contains('loading')) {
                     animateCardDraw(slotEl);
                 }
-            }, 100);
+            }, 200);
+            updateDailyDeckCount();
+            setTimeout(() => updateCardModifiers(), 200);
         } else {
             alert('Failed to draw card: ' + (data.message || 'Unknown error'));
         }
@@ -913,8 +914,8 @@ function updateCardModifiers() {
 }
 
 function addModifierBadges(modifiers) {
-    // Remove existing badges
-    document.querySelectorAll('.modifier-badge').forEach(badge => badge.remove());
+    // Clean up badges that no longer have active modifiers
+    cleanupOrphanedBadges(modifiers);
     
     modifiers.forEach(modifier => {
         const cardTypes = [];
@@ -926,14 +927,40 @@ function addModifierBadges(modifiers) {
         cardTypes.forEach(cardType => {
             // Add badges to daily deck cards
             document.querySelectorAll(`.card-type-icon.${cardType}`).forEach(icon => {
-                addBadgeToCard(icon.closest('.card-content'), modifier);
+                const cardElement = icon.closest('.card-content');
+                if (cardElement && !cardElement.querySelector('.modifier-badge')) {
+                    addBadgeToCard(cardElement, modifier);
+                }
             });
             
             // Add badges to hand cards
             document.querySelectorAll(`.hand-slot-card-type-icon.${cardType}`).forEach(icon => {
-                addBadgeToCard(icon.closest('.hand-slot-card'), modifier);
+                const cardElement = icon.closest('.hand-slot-card');
+                if (cardElement && !cardElement.querySelector('.modifier-badge')) {
+                    addBadgeToCard(cardElement, modifier);
+                }
             });
         });
+    });
+}
+
+function cleanupOrphanedBadges(activeModifiers) {
+    document.querySelectorAll('.modifier-badge').forEach(badge => {
+        const cardElement = badge.closest('.card-content, .hand-slot-card');
+        if (!cardElement) {
+            badge.remove();
+            return;
+        }
+        
+        // Check if this badge's modifier is still active
+        const badgeText = badge.textContent.trim();
+        const isStillActive = activeModifiers.some(modifier => 
+            badgeText.includes(modifier.card_name)
+        );
+        
+        if (!isStillActive) {
+            badge.remove();
+        }
     });
 }
 
@@ -1580,15 +1607,15 @@ function drawSnapCard() {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
+            const slots = document.querySelectorAll('.hand-slot.filled');
+            const lastSlot = slots[slots.length - 1];
+            lastSlot.classList.add('loading');
             loadHandCards();
             setTimeout(() => {
-                const slots = document.querySelectorAll('.hand-slot.filled');
-                const lastSlot = slots[slots.length - 1];
-                if (lastSlot) {
-                    lastSlot.classList.add('loading');
+                if (lastSlot && lastSlot.classList.contains('loading')) {
                     animateHandCardIn(lastSlot);
                 }
-            }, 100);
+            }, 200);
         } else {
             alert('Failed to draw snap card: ' + data.message);
         }
@@ -1606,15 +1633,15 @@ function drawSpicyCard() {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
+            const slots = document.querySelectorAll('.hand-slot.filled');
+            const lastSlot = slots[slots.length - 1];
+            lastSlot.classList.add('loading');
             loadHandCards();
             setTimeout(() => {
-                const slots = document.querySelectorAll('.hand-slot.filled');
-                const lastSlot = slots[slots.length - 1];
-                if (lastSlot) {
-                    lastSlot.classList.add('loading');
+                if (lastSlot && lastSlot.classList.contains('loading')) {
                     animateHandCardIn(lastSlot);
                 }
-            }, 100);
+            }, 200);
         } else {
             alert('Failed to draw spicy card: ' + data.message);
         }
@@ -1647,7 +1674,7 @@ function updateHandSlots() {
     // Fill slots with cards
     let slotIndex = 0;
     handCards.forEach(card => {
-        for (let i = 0; i < card.quantity && slotIndex < 6; i++) {
+        for (let i = 0; i < card.quantity && slotIndex < 10; i++) {
             const slot = slots[slotIndex];
             if (!slot) continue;
             
@@ -1967,59 +1994,154 @@ function updateStatusEffects() {
     });
 }
 
-function showActiveEffectsPopover(isOpponent = false) {
-    console.log('showActiveEffectsPopover called, isOpponent:', isOpponent);
+function showStatusEffectSlideout(effectType, isOpponent = false) {
+    const slideout = document.getElementById('statusEffectSlideout');
+    const title = document.getElementById('slideoutTitle');
+    const content = document.getElementById('slideoutContent');
+    
+    if (!slideout || !title || !content) return;
+    
+    // Clear any existing timeout
+    if (slideoutTimeout) {
+        clearTimeout(slideoutTimeout);
+    }
+
+    if(waitCountdownInterval) {
+        clearInterval(waitCountdownInterval);
+        waitCountdownInterval = null;
+    }
+    
+    // Check if already showing and needs to hide first
+    const isCurrentlyActive = slideout.classList.contains('active');
+    
+    if (isCurrentlyActive) {
+        // Hide first, then show new content after transition
+        slideout.classList.remove('active');
+        
+        setTimeout(() => {
+            setupSlideoutContent(slideout, title, content, effectType, isOpponent);
+        }, 300); // Match CSS transition duration
+    } else {
+        // Show immediately
+        setupSlideoutContent(slideout, title, content, effectType, isOpponent);
+    }
+}
+
+function setupSlideoutContent(slideout, title, content, effectType, isOpponent) {
+    // Set up slideout based on type
+    slideout.className = `status-effect-slideout ${effectType}-type`;
+    
+    if (effectType === 'wait') {
+        showWaitSlideout(title, content, isOpponent);
+    } else {
+        showEffectsSlideout(effectType, title, content, isOpponent);
+    }
+    
+    // Show slideout
+    setTimeout(() => {
+        slideout.classList.add('active');
+    }, 50);
+    
+    // Auto-hide after 5 seconds
+    slideoutTimeout = setTimeout(() => {
+        hideStatusEffectSlideout();
+    }, 5000);
+}
+
+function showWaitSlideout(title, content, isOpponent) {
+    title.innerHTML = '<i class="fa-solid fa-circle-pause"></i> Wait Penalty';
+    
+    // Get wait time from the correct system
     fetch('game.php', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: 'action=get_active_effects_details' + (isOpponent ? '&target=opponent' : '')
+        body: `action=get_veto_wait_status${isOpponent ? '&target=opponent' : ''}`
     })
     .then(response => response.json())
     .then(data => {
-        console.log('Effects data:', data); // Debug log
+        if (data.success && data.wait_until) {
+            const waitUntil = new Date(data.wait_until);
+            
+            function updateCountdown() {
+                const now = new Date();
+                const diff = waitUntil - now;
+                
+                if (diff <= 0) {
+                    content.innerHTML = `<div class="slideout-countdown">0:00</div>`;
+                    if (waitCountdownInterval) {
+                        clearInterval(waitCountdownInterval);
+                        waitCountdownInterval = null;
+                    }
+                    return;
+                }
+                
+                const minutes = Math.floor(diff / (1000 * 60));
+                const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+                const waitTime = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+                content.innerHTML = `<div class="slideout-countdown">${waitTime}</div>`;
+            }
+            
+            // Initial update
+            updateCountdown();
+            
+            // Start interval
+            waitCountdownInterval = setInterval(updateCountdown, 1000);
+        } else {
+            content.innerHTML = `<div class="slideout-countdown">0:00</div>`;
+        }
+    })
+    .catch(() => {
+        content.innerHTML = `<div class="slideout-countdown">0:00</div>`;
+    });
+}
+
+function showEffectsSlideout(effectType, title, content, isOpponent) {
+    const iconClass = effectType === 'curse' ? 'fa-skull-crossbones' : 'fa-star';
+    const typeLabel = effectType === 'curse' ? 'Curses' : 'Powers';
+    
+    title.innerHTML = `<i class="fa-solid ${iconClass}"></i> Active ${typeLabel}`;
+    content.innerHTML = '<div>Loading...</div>';
+    
+    // Fetch specific effect type details
+    fetch('game.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: `action=get_active_effects_details${isOpponent ? '&target=opponent' : ''}`
+    })
+    .then(response => response.json())
+    .then(data => {
         if (data.success) {
-            createEffectsPopover(data.curse_effects, data.power_effects);
+            const effects = effectType === 'curse' ? data.curse_effects : data.power_effects;
+            
+            if (effects.length === 0) {
+                content.innerHTML = `<div>No active ${effectType}s</div>`;
+            } else {
+                content.innerHTML = effects.map(effect => `
+                    <div class="slideout-effect">
+                        <div class="slideout-effect-name">${effect.card_name}</div>
+                        <div>${effect.card_description}</div>
+                        ${effect.expires_at ? `<div style="margin-top: 4px; opacity: 0.8;">Expires: ${new Date(effect.expires_at).toLocaleTimeString()}</div>` : ''}
+                    </div>
+                `).join('');
+            }
         }
     });
 }
 
-function createEffectsPopover(curseEffects, powerEffects) {
-    const popover = document.createElement('div');
-    popover.className = 'effects-popover';
-    popover.innerHTML = `
-        <div class="effects-popover-content">
-            <h4>Active Effects</h4>
-            ${curseEffects.map(effect => `
-                <div class="effect-item curse-effect">
-                    <i class="fa-solid fa-skull-crossbones"></i>
-                    <div class="effect-details">
-                        <div class="effect-name">${effect.card_name}</div>
-                        <div class="effect-description">${effect.card_description}</div>
-                        ${effect.expires_at ? `<div class="effect-expires">Expires: ${new Date(effect.expires_at).toLocaleTimeString()}</div>` : ''}
-                    </div>
-                </div>
-            `).join('')}
-            ${powerEffects.map(effect => `
-                <div class="effect-item power-effect">
-                    <i class="fa-solid fa-star"></i>
-                    <div class="effect-details">
-                        <div class="effect-name">${effect.card_name}</div>
-                        <div class="effect-description">${effect.card_description}</div>
-                        ${effect.expires_at ? `<div class="effect-expires">Expires: ${new Date(effect.expires_at).toLocaleTimeString()}</div>` : ''}
-                    </div>
-                </div>
-            `).join('')}
-            <button onclick="closeEffectsPopover()">Close</button>
-        </div>
-    `;
-    
-    document.body.appendChild(popover);
-    setTimeout(() => popover.classList.add('active'), 10);
-}
-
-function closeEffectsPopover() {
-    const popover = document.querySelector('.effects-popover');
-    if (popover) popover.remove();
+function hideStatusEffectSlideout() {
+    const slideout = document.getElementById('statusEffectSlideout');
+    if (slideout) {
+        slideout.classList.remove('active');
+    }
+    if (slideoutTimeout) {
+        clearTimeout(slideoutTimeout);
+        slideoutTimeout = null;
+    }
+    // Clear wait countdown interval
+    if (waitCountdownInterval) {
+        clearInterval(waitCountdownInterval);
+        waitCountdownInterval = null;
+    }
 }
 
 function displayStatusEffects(containerId, effects) {
@@ -2038,8 +2160,11 @@ function displayStatusEffects(containerId, effects) {
         span.style.cursor = 'pointer';
         span.addEventListener('click', function(e) {
             e.stopPropagation();
-            console.log('Status effect clicked for:', isOpponent ? 'opponent' : 'player');
-            showActiveEffectsPopover(isOpponent);
+            // Only show slideout if score bug is not expanded
+            const scoreBug = document.getElementById('scoreBug');
+            if (!scoreBug.classList.contains('expanded')) {
+                showStatusEffectSlideout(effect.type, isOpponent);
+            }
         });
         
         if (effect.type === 'curse') {

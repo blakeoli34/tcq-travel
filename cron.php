@@ -15,6 +15,30 @@ if (isset($argv[1]) && strpos($argv[1], 'timer_') === 0) {
     exit;
 }
 
+// Handle veto wait end notifications
+if ($argv[1] === 'veto_wait_end') {
+    $gameId = intval($argv[2]);
+    $playerId = intval($argv[3]);
+    
+    // Verify veto wait has actually ended
+    $pdo = Config::getDatabaseConnection();
+    $timezone = new DateTimeZone('America/Indiana/Indianapolis');
+    $now = new DateTime('now', $timezone);
+    
+    $stmt = $pdo->prepare("SELECT veto_wait_until FROM players WHERE game_id = ? AND id = ?");
+    $stmt->execute([$gameId, $playerId]);
+    $vetoWaitUntil = $stmt->fetchColumn();
+    
+    if (!$vetoWaitUntil || new DateTime($vetoWaitUntil, $timezone) <= $now) {
+        require_once 'daily_deck_functions.php';
+        notifyVetoWaitEnd($gameId, $playerId);
+        error_log("Sent veto wait end notification for player {$playerId}");
+    } else {
+        error_log("Veto wait still active for player {$playerId}, skipping notification");
+    }
+    exit;
+}
+
 switch ($action) {
     case 'timers':
         checkExpiredTimers();
@@ -234,18 +258,6 @@ function checkExpiredTimers($specificTimerId = null) {
                 // Delete timer
                 $stmt = $pdo->prepare("DELETE FROM timers WHERE id = ?");
                 $stmt->execute([$timer['id']]);
-
-                // In checkExpiredTimers, after clearing timer, add:
-                if ($timer['fcm_token']) {
-                    // Check if this is a veto wait timer
-                    $stmt = $pdo->prepare("SELECT veto_wait_until FROM players WHERE id = ?");
-                    $stmt->execute([$timer['player_id']]);
-                    $vetoWait = $stmt->fetchColumn();
-                    
-                    if (!$vetoWait || strtotime($vetoWait) <= time()) {
-                        notifyVetoWaitEnd($timer['game_id'], $timer['player_id']);
-                    }
-                }
                 
             } catch (Exception $e) {
                 error_log("Error processing timer {$timer['id']}: " . $e->getMessage());

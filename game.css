@@ -548,6 +548,7 @@ body.cruise .background-container.cruise {
     flex-flow: row wrap;
     gap: 10px;
     overflow-y: auto;
+    max-height: calc(100% - 100px);
 }
 
 .hand-slot {
@@ -843,7 +844,6 @@ body.cruise .background-container.cruise {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    border-radius: 20px;
 }
 
 .veto-message {
@@ -854,14 +854,13 @@ body.cruise .background-container.cruise {
 }
 
 .veto-countdown {
-    color: #ff6b6b;
+    color: #c62828;
     font-size: 32px;
     font-weight: 900;
     font-family: monospace;
 }
 
-.veto-message,
-.veto-countdown {
+.veto-message {
     text-shadow: 0 0 10px rgba(0,0,0,0.2);
 }
 
@@ -904,6 +903,7 @@ body.cruise .background-container.cruise {
     gap: 20px;
     width: 100%;
     max-width: 400px;
+    transition: all 0.5s ease-in-out;
 }
 
 .daily-slot {
@@ -923,12 +923,6 @@ body.cruise .background-container.cruise {
     transition: all 0.3s ease;
     position: relative;
     padding: 5px;
-}
-
-.daily-deck-container.wait .daily-slot {
-    pointer-events: none;
-    filter: blur(8px);
-    opacity: 0.5;
 }
 
 .daily-slot.expanded {
@@ -1130,10 +1124,11 @@ body.cruise .background-container.cruise {
     font-size: 8px;
 }
 
+.daily-deck-container.wait .daily-slots,
 .daily-deck-container.downtime .daily-slots,
 .daily-deck-container.deck-empty .daily-slots {
-    filter: blur(8px);
-    opacity: 0.3;
+    opacity: 0;
+    transform: scale(0);
     pointer-events: none;
 }
 
@@ -1159,7 +1154,7 @@ body.cruise .background-container.cruise {
 }
 
 .downtime-countdown {
-    color: #ff6b6b;
+    color: rgba(255,255,255,0.8);
     font-size: 32px;
     font-weight: 900;
     font-family: monospace;
@@ -1376,66 +1371,83 @@ body.cruise .background-container.cruise {
     color: white;
 }
 
-.effects-popover {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: rgba(0,0,0,0.5);
-    z-index: 2000;
+.status-effect-slideout {
+    position: absolute;
+    bottom: calc(100% + 2px);
+    left: 50%;
+    transform: translateX(-50%) scaleY(0);
+    transform-origin: bottom center;
+    background: white;
+    border-radius: 12px 12px 0 0;
+    border: solid 2px #fff;
+    border-bottom-width: 0;
+    padding: 12px 12px 18px;
+    min-width: 70%;
+    max-width: 90%;
+    box-shadow: 0 -4px 20px rgba(0,0,0,0.1);
+    z-index: 0;
+    opacity: 0;
+    transition: all 0.3s ease;
+    pointer-events: none;
+}
+
+.status-effect-slideout.active {
+    transform: translateX(-50%) scaleY(1);
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.status-effect-slideout.curse-type {
+    background: #67597A;
+    color: white;
+}
+
+.status-effect-slideout.power-type {
+    background: #68B684;
+    color: white;
+}
+
+.status-effect-slideout.wait-type {
+    background: #c62828;
+    color: white;
+}
+
+.slideout-title {
+    font-weight: 700;
+    font-size: 14px;
+    margin-bottom: 10px;
     display: flex;
     align-items: center;
-    justify-content: center;
-    opacity: 0;
-    transition: opacity 0.3s ease;
+    gap: 8px;
 }
 
-.effects-popover.active {
-    opacity: 1;
-}
-
-.effects-popover-content {
-    background: white;
-    border-radius: 15px;
-    padding: 20px;
-    max-width: 400px;
-    max-height: 80vh;
-    overflow-y: auto;
-}
-
-.effect-item {
-    display: flex;
-    gap: 10px;
-    padding: 10px;
-    margin-bottom: 10px;
-    border-radius: 8px;
-}
-
-.curse-effect {
-    background: rgba(103, 89, 122, 0.1);
-    border-left: 3px solid #67597A;
-}
-
-.power-effect {
-    background: rgba(104, 182, 132, 0.1);
-    border-left: 3px solid #68B684;
-}
-
-.effect-name {
-    font-weight: 700;
-    margin-bottom: 5px;
-}
-
-.effect-description {
+.slideout-content {
     font-size: 12px;
-    color: #666;
+    line-height: 1.4;
 }
 
-.effect-expires {
-    font-size: 10px;
-    color: #999;
-    margin-top: 5px;
+.slideout-effect {
+    margin-bottom: 8px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(255,255,255,0.2);
+}
+
+.slideout-effect:last-child {
+    margin-bottom: 0;
+    padding-bottom: 0;
+    border-bottom: none;
+}
+
+.slideout-effect-name {
+    font-weight: 600;
+    margin-bottom: 2px;
+}
+
+.slideout-countdown {
+    font-size: 18px;
+    font-weight: 900;
+    font-family: monospace;
+    text-align: center;
 }
 
 /* Expanded Score Bug */

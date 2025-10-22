@@ -236,6 +236,16 @@ function awardChallengeMaster($gameId) {
             $awardPoints = 25;
             updateScore($gameId, $masterId, $awardPoints, $masterId);
             recordPlayerAward($gameId, $masterId, 'challenge_master', $challengeCount, $awardPoints);
+
+            $players = getGamePlayers($gameId);
+
+            foreach($players as $player) {
+                if($player['id'] == $masterId) {
+                    if($player['fcm_token']) {
+                        sendPushNotification($player['fcm_token'], 'Challenge Master!', 'You completed the most challenges and have been awarded 25 points!');
+                    }
+                }
+            }
             
             return [
                 'success' => true, 

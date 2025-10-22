@@ -686,6 +686,17 @@ function applyVetoWait($gameId, $playerId, $minutes) {
             WHERE game_id = ? AND id = ?
         ");
         $stmt->execute([$waitUntil->format('Y-m-d H:i:s'), $gameId, $playerId]);
+
+        // Schedule notification for when veto wait ends
+        $endTimeLocal = clone $waitUntil;
+        $endTimeLocal->add(new DateInterval('PT10S'));
+        $atTime = $endTimeLocal->format('H:i M j, Y');
+        $seconds = $endTimeLocal->format('s');
+
+        $atCommand = "sleep {$seconds} && /usr/bin/php /var/www/travel/cron.php veto_wait_end {$gameId} {$playerId}";
+        $atJob = shell_exec("echo '{$atCommand}' | at {$atTime} 2>&1");
+
+        error_log("Scheduled veto wait notification for player {$playerId} at {$atTime} +{$seconds}s - Result: {$atJob}");
         
         error_log("Applied veto wait for player {$playerId}: until " . $waitUntil->format('Y-m-d H:i:s') . " (Indianapolis time)");
         

@@ -315,7 +315,7 @@ function createTimer($gameId, $playerId, $description, $durationMinutes) {
         $atTime = $endTimeLocal->format('H:i M j, Y');
         $seconds = $endTimeLocal->format('s');
 
-        $atCommand = "sleep {$seconds} && /usr/bin/php /var/www/thecouplesquest/cron.php timer_{$timerId}";
+        $atCommand = "sleep {$seconds} && /usr/bin/php /var/www/travel/cron.php timer_{$timerId}";
 
         $atJob = shell_exec("echo '{$atCommand}' | at {$atTime} 2>&1");
 
