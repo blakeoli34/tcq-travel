@@ -572,6 +572,55 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             }
             exit;
 
+        case 'get_active_timers':
+            try {
+                $pdo = Config::getDatabaseConnection();
+                $timezone = new DateTimeZone('America/Indiana/Indianapolis');
+                
+                // Get active timers for both players
+                $stmt = $pdo->prepare("
+                    SELECT t.*, ace.player_id, c.card_name
+                    FROM timers t
+                    JOIN active_curse_effects ace ON t.id = ace.timer_id
+                    JOIN cards c ON ace.card_id = c.id
+                    WHERE t.game_id = ? AND t.is_active = TRUE
+                ");
+                $stmt->execute([$player['game_id']]);
+                $timers = $stmt->fetchAll();
+                
+                $playerTimers = [];
+                $opponentTimers = [];
+                
+                foreach ($timers as $timer) {
+                    $endTime = new DateTime($timer['end_time'], new DateTimeZone('UTC'));
+                    $endTime->setTimezone($timezone);
+                    
+                    $timerData = [
+                        'id' => $timer['id'],
+                        'card_name' => $timer['card_name'],
+                        'end_time' => $endTime->format('Y-m-d\TH:i:s.000\Z')
+                    ];
+                    
+                    if ($timer['player_id'] == $player['id']) {
+                        $playerTimers[] = $timerData;
+                    } else {
+                        $opponentTimers[] = $timerData;
+                    }
+                }
+                
+                echo json_encode([
+                    'success' => true,
+                    'player_timers' => $playerTimers,
+                    'opponent_timers' => $opponentTimers
+                ]);
+                exit;
+                
+            } catch (Exception $e) {
+                error_log("Error getting active timers: " . $e->getMessage());
+                echo json_encode(['success' => false]);
+                exit;
+            }
+
         case 'get_awards_info':
             if ($gameMode !== 'digital') {
                 echo json_encode(['success' => false, 'message' => 'Not a digital game']);
@@ -682,10 +731,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     // Clear curse
                     $stmt = $pdo->prepare("DELETE FROM active_curse_effects WHERE id = ?");
                     $stmt->execute([$effectId]);
-                    
-                    if ($curse['slot_number']) {
-                        completeCurseSlot($player['game_id'], $player['id'], $curse['slot_number']);
-                    }
                     
                     echo json_encode([
                         'success' => true,
@@ -1517,7 +1562,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                             <div class="deck-header">
                                 <div class="deck-title">
                                     <i class="fa-solid fa-camera-retro"></i>
-                                    Draw Snap Card
+                                    Draw Snap
                                 </div>
                             </div>
                             <div class="deck-count">Tap to draw</div>
@@ -1527,14 +1572,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                             <div class="deck-header">
                                 <div class="deck-title">
                                     <i class="fa-solid fa-pepper-hot"></i>
-                                    Draw Spicy Card
+                                    Draw Spicy
                                 </div>
                             </div>
                             <div class="deck-count">Tap to draw</div>
                         </div>
                     </div>
                     
-                    <!-- 6 Card Slots Display -->
+                    <!-- 10 Card Slots Display -->
                     <div class="hand-slots" id="handSlots">
                         <div class="hand-slot empty" data-slot="1">
                             <div class="empty-slot-indicator">Empty</div>
@@ -1552,6 +1597,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                             <div class="empty-slot-indicator">Empty</div>
                         </div>
                         <div class="hand-slot empty" data-slot="6">
+                            <div class="empty-slot-indicator">Empty</div>
+                        </div>
+                        <div class="hand-slot empty" data-slot="7">
+                            <div class="empty-slot-indicator">Empty</div>
+                        </div>
+                        <div class="hand-slot empty" data-slot="8">
+                            <div class="empty-slot-indicator">Empty</div>
+                        </div>
+                        <div class="hand-slot empty" data-slot="9">
+                            <div class="empty-slot-indicator">Empty</div>
+                        </div>
+                        <div class="hand-slot empty" data-slot="10">
                             <div class="empty-slot-indicator">Empty</div>
                         </div>
                     </div>

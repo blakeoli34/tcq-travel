@@ -41,7 +41,10 @@ $(document).ready(function() {
 
     if (gameData.gameStatus === 'active') {
         updateDailyGameClock();
-        setInterval(updateDailyGameClock, 1000);
+        setInterval(() => {
+            updateDailyGameClock();
+            updateCurseTimers();
+        }, 1000);
     }
 
     setTimeout(() => {
@@ -97,24 +100,39 @@ $(document).ready(function() {
     let isScrolling = false;
 
     $(document).on('touchstart', function(e) {
-        // Don't handle if touching the score bug or scrollable areas
-        if ($(e.target).closest('#scoreBug, #scoreBugExpanded, #debugPanel, .daily-deck-container').length > 0) {
+        const dailyDeckContainer = $(e.target).closest('.daily-deck-container')[0];
+
+        if (dailyDeckContainer && hasOverflow(dailyDeckContainer)) {
+            // Container has overflow (scrollable content), so don't handle swipe gestures
             return;
         }
+        // Don't handle if touching the score bug or scrollable areas
+        if ($(e.target).closest('#scoreBug, #scoreBugExpanded, #debugPanel').length > 0) {
+            return;
+        }
+
         touchStartY = e.originalEvent.changedTouches[0].screenY;
         isScrolling = false;
     });
 
     $(document).on('touchmove', function(e) {
-        // Check if we're scrolling within debug panel or daily deck container
-        if ($(e.target).closest('#debugPanel, .daily-deck-container').length > 0) {
+        // Check if we're scrolling within debug panel
+        if ($(e.target).closest('#debugPanel').length > 0) {
             isScrolling = true;
         }
     });
 
     $(document).on('touchend', function(e) {
-        // Don't handle if touching the score bug, scrollable areas, or if we detected scrolling
-        if ($(e.target).closest('#scoreBug, #scoreBugExpanded, #debugPanel, .daily-deck-container').length > 0 || isScrolling) {
+        const dailyDeckContainer = $(e.target).closest('.daily-deck-container')[0];
+
+        if (dailyDeckContainer && hasOverflow(dailyDeckContainer)) {
+            // Container has overflow (scrollable content), so don't handle swipe gestures
+            isScrolling = false;
+            return;
+        }
+
+        // Don't handle if touching the score bug, other scrollable areas, or if we detected scrolling
+        if ($(e.target).closest('#scoreBug, #scoreBugExpanded, #debugPanel').length > 0 || isScrolling) {
             isScrolling = false;
             return;
         }
@@ -143,6 +161,10 @@ $(document).ready(function() {
     }
 });
 
+function hasOverflow(element) {
+    return element.scrollHeight > element.offsetHeight;
+}
+
 function stopRefreshInterval() {
     if (refreshInterval) {
         clearInterval(refreshInterval);
@@ -162,7 +184,6 @@ function startRefreshInterval() {
             updateStatusEffects();
             refreshGameData();
             checkGameStatus();
-            updateCurseTimers();
             loadHandCards();
             updateCardModifiers();
             checkForDeckPeek();
@@ -557,6 +578,7 @@ function animateHandCardIn(slotElement) {
     if (cardContent) {
         cardContent.classList.add('card-draw-animation');
         setTimeout(() => {
+            slotElement.classList.remove('loading');
             cardContent.classList.remove('card-draw-animation');
         }, 1200);
     }
@@ -597,7 +619,7 @@ function createSlotCardHTML(slot) {
     
     // Add auto-activate message for curse cards
     if (slot.card_category === 'curse' && !slot.curse_activated) {
-        badges = `<div class="curse-auto-activate" id="curse-auto-${slot.slot_number}">Activating in 5...</div>` + badges;
+        badges += `<div class="card-badge auto-activate" id="curse-auto-${slot.slot_number}">Activating in 10s...</div>`;
     }
     
     const actions = getSlotActions(slot.card_category);
@@ -645,21 +667,21 @@ function updateDeckMessage(slots) {
 
 function drawAllSlots() {
     drawToSlot(1);
-    setTimeout(() => drawToSlot(2), 300);
-    setTimeout(() => drawToSlot(3), 600);
+    setTimeout(() => drawToSlot(2), 1600);
+    setTimeout(() => drawToSlot(3), 3200);
 }
 
 function startCurseAutoActivate(slotNumber) {
-    let countdown = 5;
-    const message = document.getElementById(`curse-auto-${slotNumber}`);
+    let countdown = 10; // Changed from 5 to 10 seconds
+    const badge = document.getElementById(`curse-auto-${slotNumber}`);
     
     const interval = setInterval(() => {
         countdown--;
-        if (message) message.textContent = `Activating in ${countdown}...`;
+        if (badge) badge.textContent = `Activating in ${countdown}s...`;
         
         if (countdown <= 0) {
             clearInterval(interval);
-            if (message) message.remove();
+            if (badge) badge.remove();
             activateCurse(slotNumber);
         }
     }, 1000);
@@ -979,6 +1001,7 @@ function vetoChallenge(slotNumber) {
             if (data.success) {
                 loadDailyDeck();
                 forceRefreshOnce();
+                checkVetoWait();
             } else {
                 alert('Failed to veto challenge: ' + data.message);
             }
@@ -1018,6 +1041,7 @@ function vetoStoredChallenge(playerCardId) {
     if (cardSlot) {
         playSoundIfEnabled('/card-vetoed.m4r');
         animateCardVeto(cardSlot);
+        forceRefreshOnce();
     }
     
     setTimeout(() => {
@@ -1030,7 +1054,7 @@ function vetoStoredChallenge(playerCardId) {
         .then(data => {
             if (data.success) {
                 loadHandCards();
-                forceRefreshOnce();
+                checkVetoWait();
             } else {
                 alert('Failed to veto challenge: ' + data.message);
             }
@@ -1048,11 +1072,42 @@ function activateCurse(slotNumber) {
     .then(data => {
         if (data.success) {
             playSoundIfEnabled('/card-curse.m4r');
-            showInAppNotification('Curse Activated!', 'Check your status effects');
-            // Add activated class to slot
+            
+            // Handle dice roll requirement
+            if (data.requires_dice_roll) {
+                setTimeout(() => {
+                    openDicePopover((die1, die2, total) => {
+                        fetch('game.php', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                            body: `action=check_curse_dice&effect_id=${data.effect_id}&die1=${die1}&die2=${die2}&total=${total}`
+                        })
+                        .then(response => response.json())
+                        .then(result => {
+                            if (result.success) {
+                                showInAppNotification(result.cleared ? 'Curse Cleared!' : 'Curse Active', result.message);
+                                updateStatusEffects();
+                            }
+                        });
+                    });
+                }, 1500);
+            }
+            
+            // Animate card content out before removing
             const slot = document.querySelector(`.daily-slot[data-slot="${slotNumber}"]`);
-            if (slot) slot.classList.add('curse-activated');
-            loadDailyDeck();
+            const cardContent = slot?.querySelector('.card-content');
+            if (cardContent) {
+                cardContent.style.transition = 'opacity 0.7s ease, transform 0.7s ease';
+                cardContent.style.opacity = '0';
+                cardContent.style.transform = 'scale(3)';
+                slot.classList.add('curse-activated');
+                
+                setTimeout(() => {
+                    loadDailyDeck();
+                }, 700);
+            } else {
+                loadDailyDeck();
+            }
             setTimeout(() => updateStatusEffects(), 1000);
         } else {
             alert('Failed to activate curse: ' + data.message);
@@ -1089,7 +1144,6 @@ function activatePower(slotNumber) {
     .then(data => {
         if (data.success) {
             playSoundIfEnabled('/card-power.m4r');
-            showInAppNotification('Power Activated!', data.message);
             loadDailyDeck();
             setTimeout(() => {
                 refreshGameData();
@@ -1110,7 +1164,7 @@ function discardPower(slotNumber) {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            showInAppNotification('Power Discarded', data.message);
+            playSoundIfEnabled('/card-vetoed.m4r');
             loadDailyDeck();
         } else {
             alert('Failed to discard power: ' + data.message);
@@ -1481,6 +1535,7 @@ function vetoSnapCard(playerCardId) {
         .then(data => {
             if (data.success) {
                 loadHandCards();
+                checkVetoWait();
             } else {
                 alert('Failed to veto snap card: ' + data.message);
             }
@@ -1506,6 +1561,7 @@ function vetoSpicyCard(playerCardId) {
         .then(data => {
             if (data.success) {
                 loadHandCards();
+                checkVetoWait();
             } else {
                 alert('Failed to veto spicy card: ' + data.message);
             }
@@ -1528,7 +1584,10 @@ function drawSnapCard() {
             setTimeout(() => {
                 const slots = document.querySelectorAll('.hand-slot.filled');
                 const lastSlot = slots[slots.length - 1];
-                if (lastSlot) animateHandCardIn(lastSlot);
+                if (lastSlot) {
+                    lastSlot.classList.add('loading');
+                    animateHandCardIn(lastSlot);
+                }
             }, 100);
         } else {
             alert('Failed to draw snap card: ' + data.message);
@@ -1551,7 +1610,10 @@ function drawSpicyCard() {
             setTimeout(() => {
                 const slots = document.querySelectorAll('.hand-slot.filled');
                 const lastSlot = slots[slots.length - 1];
-                if (lastSlot) animateHandCardIn(lastSlot);
+                if (lastSlot) {
+                    lastSlot.classList.add('loading');
+                    animateHandCardIn(lastSlot);
+                }
             }, 100);
         } else {
             alert('Failed to draw spicy card: ' + data.message);
@@ -1575,8 +1637,12 @@ function updateHandSlots() {
     const totalCards = handCards.reduce((sum, card) => sum + card.quantity, 0);
     if (handCountEl) handCountEl.textContent = totalCards;
 
-    // Update app badge
-    updateAppBadge(totalCards);
+    if(gameData.gameStatus === 'active') {
+        // Update app badge
+        updateAppBadge(totalCards);
+    } else {
+        clearAppBadge();
+    }
     
     // Fill slots with cards
     let slotIndex = 0;
@@ -2530,6 +2596,7 @@ function endGame() {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
+            clearAppBadge();
             location.reload();
         } else {
             alert('Failed to end game: ' + (data.message || 'Unknown error'));

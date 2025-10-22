@@ -210,12 +210,6 @@ function checkExpiredTimers($specificTimerId = null) {
                     $stmt = $pdo->prepare("DELETE FROM active_curse_effects WHERE id = ?");
                     $stmt->execute([$curseEffect['id']]);
                     
-                    // Clear curse slot if it has one
-                    if ($curseEffect['slot_number']) {
-                        require_once 'travel_card_actions.php';
-                        completeCurseSlot($timer['game_id'], $timer['player_id'], $curseEffect['slot_number']);
-                    }
-                    
                     // Send notification
                     if ($timer['fcm_token']) {
                         sendPushNotification(
@@ -255,6 +249,39 @@ function checkExpiredTimers($specificTimerId = null) {
                 
             } catch (Exception $e) {
                 error_log("Error processing timer {$timer['id']}: " . $e->getMessage());
+            }
+        }
+
+        if ($timer['timer_type'] === 'siphon') {
+            // Subtract score
+            require_once 'travel_card_actions.php';
+            updateScore($timer['game_id'], $timer['player_id'], -$timer['score_subtract'], $timer['player_id']);
+            
+            // Check if completion condition is met
+            $shouldContinue = true;
+            if ($timer['completion_type'] === 'first_trigger_any') {
+                // Check if any challenge, snap, or spicy was completed
+                $stmt = $pdo->prepare("
+                    SELECT COUNT(*) FROM completed_cards 
+                    WHERE game_id = ? AND player_id = ? AND card_type IN ('challenge', 'snap', 'spicy')
+                    AND created_at > ?
+                ");
+                $stmt->execute([$timer['game_id'], $timer['player_id'], $timer['start_time']]);
+                $shouldContinue = $stmt->fetchColumn() == 0;
+            } elseif ($timer['completion_type'] === 'first_trigger') {
+                // Check if spicy was completed
+                $stmt = $pdo->prepare("
+                    SELECT COUNT(*) FROM completed_cards 
+                    WHERE game_id = ? AND player_id = ? AND card_type = 'spicy'
+                    AND created_at > ?
+                ");
+                $stmt->execute([$timer['game_id'], $timer['player_id'], $timer['start_time']]);
+                $shouldContinue = $stmt->fetchColumn() == 0;
+            }
+            
+            if ($shouldContinue) {
+                // Create new timer for next cycle
+                createSiphonTimer($timer['game_id'], $timer['player_id'], $timer['description'], $timer['duration_minutes'], $timer['score_subtract'], $timer['completion_type']);
             }
         }
         

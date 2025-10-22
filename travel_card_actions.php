@@ -113,7 +113,7 @@ function vetoChallenge($gameId, $playerId, $slotNumber) {
 
         // Check if veto would draw cards but hand is full
         $handCount = getPlayerHandCount($gameId, $playerId);
-        if ($handCount >= 6 && ($card['veto_snap'] || $card['veto_spicy'])) {
+        if ($handCount >= 10 && ($card['veto_snap'] || $card['veto_spicy'])) {
             throw new Exception("Cannot veto: hand is full and this would draw additional cards");
         }
         
@@ -774,6 +774,44 @@ function applyModifiersToChallenge($gameId, $playerId, $basePoints) {
             return $finalPoints;
         }
         
+        // Check for active power effects with score_modify that modify challenges
+        $stmt = $pdo->prepare("
+            SELECT ape.*, c.power_score_modify
+            FROM active_power_effects ape
+            JOIN cards c ON ape.power_card_id = c.id
+            WHERE ape.game_id = ? AND ape.player_id = ? AND c.power_challenge_modify = 1 AND c.power_score_modify != 'none'
+        ");
+        $stmt->execute([$gameId, $playerId]);
+        $powerModifyEffects = $stmt->fetchAll();
+        
+        $finalPoints = $basePoints;
+        
+        foreach ($powerModifyEffects as $effect) {
+            switch ($effect['power_score_modify']) {
+                case 'half':
+                    $finalPoints = floor($finalPoints / 2);
+                    break;
+                case 'double':
+                    $finalPoints *= 2;
+                    break;
+                case 'zero':
+                    $finalPoints = 0;
+                    break;
+                case 'extra_point':
+                    $finalPoints += 1;
+                    break;
+            }
+            
+            // Remove the power effect after use
+            $stmt = $pdo->prepare("DELETE FROM active_power_effects WHERE id = ?");
+            $stmt->execute([$effect['id']]);
+        }
+        
+        // If power effects were applied, return the result
+        if (!empty($powerModifyEffects)) {
+            return $finalPoints;
+        }
+        
         // Get active curse effects that modify challenges
         $stmt = $pdo->prepare("
             SELECT ace.*, c.score_modify
@@ -783,8 +821,6 @@ function applyModifiersToChallenge($gameId, $playerId, $basePoints) {
         ");
         $stmt->execute([$gameId, $playerId]);
         $effects = $stmt->fetchAll();
-        
-        $finalPoints = $basePoints;
         
         foreach ($effects as $effect) {
             switch ($effect['score_modify']) {
@@ -848,8 +884,14 @@ function processCurseCard($gameId, $playerId, $card) {
     }
     
     if ($card['score_subtract']) {
-        updateScore($gameId, $playerId, -$card['score_subtract'], $playerId);
-        $effects[] = "Lost {$card['score_subtract']} points";
+        if ($card['repeat_count'] && $card['timer_completion_type']) {
+            // This is a siphon card - don't subtract immediately, handle in recurring section
+            $isInstant = false;
+        } else {
+            // Regular instant score subtract
+            updateScore($gameId, $playerId, -$card['score_subtract'], $playerId);
+            $effects[] = "Lost {$card['score_subtract']} points";
+        }
     }
     
     if ($card['score_steal']) {
@@ -866,15 +908,10 @@ function processCurseCard($gameId, $playerId, $card) {
     }
     
     // Check for ongoing effects
-    if ($card['challenge_modify'] || $card['snap_modify'] || $card['spicy_modify'] || 
+    if ($card['challenge_modify'] || $card['snap_modify'] || $card['spicy_modify'] || $card['veto_modify'] || 
         $card['timer'] || $card['repeat_count'] || $card['roll_dice'] || 
         $card['complete_snap'] || $card['complete_spicy']) {
         $isInstant = false;
-    }
-    
-    // Recurring effects
-    if ($card['repeat_count']) {
-        $effects[] = "Will lose 1 point every {$card['repeat_count']} minutes until cleared";
     }
     
     // Timer effects
@@ -886,20 +923,44 @@ function processCurseCard($gameId, $playerId, $card) {
             $effects[] = "Timer started for {$card['timer']} minutes";
         }
     }
+
+    // Recurring siphon effects (clock/spicy siphon)
+    if ($card['score_subtract'] && $card['repeat_count'] && $card['timer_completion_type']) {
+        // Siphon effect - subtract immediately then start recurring timer
+        updateScore($gameId, $playerId, -$card['score_subtract'], $playerId);
+        $effects[] = "Lost {$card['score_subtract']} points and will continue losing {$card['score_subtract']} points every {$card['repeat_count']} minutes until cleared";
+        
+        // Create siphon timer
+        $siphonResult = createSiphonTimer($gameId, $playerId, $card['card_name'], $card['repeat_count'], $card['score_subtract'], $card['timer_completion_type']);
+        if ($siphonResult['success']) {
+            $timerId = $siphonResult['timer_id'];
+        }
+    }
     
     // Dice effects
     if ($card['roll_dice']) {
         $effects[] = "Roll dice to determine if curse is cleared";
         
-        // If there's a dice condition, we need to wait for the roll
-        if ($card['dice_condition']) {
-            // Store curse with pending dice roll
+        // Add to active effects first, then return special flag to trigger dice roll
+        $effectId = addActiveCurseEffect($gameId, $playerId, $card['id'], $card, $slotNumber, $timerId);
+        
+        if ($effectId && $card['dice_condition']) {
+            // Mark as pending dice roll
             $stmt = $pdo->prepare("
                 UPDATE active_curse_effects 
                 SET pending_dice_roll = TRUE 
                 WHERE id = ?
             ");
             $stmt->execute([$effectId]);
+            
+            // Return special flag to trigger dice roll
+            return [
+                'effects' => $effects, 
+                'is_instant' => false, 
+                'timer_id' => $timerId,
+                'requires_dice_roll' => true,
+                'effect_id' => $effectId
+            ];
         }
     }
     
@@ -1029,29 +1090,49 @@ function skipChallenge($gameId, $playerId, $slotNumber) {
 function getCurseTimers($gameId, $playerId, $opponentId) {
     try {
         $pdo = Config::getDatabaseConnection();
+        $timezone = new DateTimeZone('America/Indiana/Indianapolis');
         
-        // Get player curse timer
+        // Get player curse timer with card name
         $stmt = $pdo->prepare("
-            SELECT MIN(expires_at) as expires_at
-            FROM active_curse_effects 
-            WHERE game_id = ? AND player_id = ? AND expires_at IS NOT NULL AND expires_at > NOW()
+            SELECT ace.expires_at, c.card_name
+            FROM active_curse_effects ace
+            JOIN cards c ON ace.card_id = c.id
+            WHERE ace.game_id = ? AND ace.player_id = ? AND ace.expires_at IS NOT NULL AND ace.expires_at > NOW()
+            ORDER BY ace.expires_at ASC
+            LIMIT 1
         ");
         $stmt->execute([$gameId, $playerId]);
         $playerTimer = $stmt->fetch();
         
-        // Get opponent curse timer
+        // Get opponent curse timer with card name
         $stmt = $pdo->prepare("
-            SELECT MIN(expires_at) as expires_at
-            FROM active_curse_effects 
-            WHERE game_id = ? AND player_id = ? AND expires_at IS NOT NULL AND expires_at > NOW()
+            SELECT ace.expires_at, c.card_name
+            FROM active_curse_effects ace
+            JOIN cards c ON ace.card_id = c.id
+            WHERE ace.game_id = ? AND ace.player_id = ? AND ace.expires_at IS NOT NULL AND ace.expires_at > NOW()
+            ORDER BY ace.expires_at ASC
+            LIMIT 1
         ");
         $stmt->execute([$gameId, $opponentId]);
         $opponentTimer = $stmt->fetch();
         
+        // Convert to UTC for JavaScript
+        if ($playerTimer && $playerTimer['expires_at']) {
+            $expires = new DateTime($playerTimer['expires_at'], $timezone);
+            $expires->setTimezone(new DateTimeZone('UTC'));
+            $playerTimer['expires_at'] = $expires->format('Y-m-d\TH:i:s.000\Z');
+        }
+        
+        if ($opponentTimer && $opponentTimer['expires_at']) {
+            $expires = new DateTime($opponentTimer['expires_at'], $timezone);
+            $expires->setTimezone(new DateTimeZone('UTC'));
+            $opponentTimer['expires_at'] = $expires->format('Y-m-d\TH:i:s.000\Z');
+        }
+        
         return [
             'success' => true,
-            'player_timer' => $playerTimer['expires_at'] ? $playerTimer : null,
-            'opponent_timer' => $opponentTimer['expires_at'] ? $opponentTimer : null
+            'player_timer' => $playerTimer ?: null,
+            'opponent_timer' => $opponentTimer ?: null
         ];
         
     } catch (Exception $e) {
@@ -1079,12 +1160,14 @@ function getActiveModifiers($gameId, $playerId) {
         $stmt = $pdo->prepare("
             SELECT c.card_name, c.power_challenge_modify as challenge_modify, 
                 c.power_snap_modify as snap_modify, c.power_spicy_modify as spicy_modify, 
-                c.skip_challenge, c.bypass_expiration, c.power_veto_modify as veto_modify, 'power' as type
+                c.skip_challenge, c.bypass_expiration, c.power_veto_modify as veto_modify, 
+                c.deck_peek, 'power' as type
             FROM active_power_effects ape
             JOIN cards c ON ape.power_card_id = c.id
             WHERE ape.game_id = ? AND ape.player_id = ? 
             AND (c.power_challenge_modify = 1 OR c.power_snap_modify = 1 OR c.power_spicy_modify = 1 
-                OR c.skip_challenge = 1 OR c.bypass_expiration = 1 OR c.power_veto_modify != 'none')
+                OR c.skip_challenge = 1 OR c.bypass_expiration = 1 OR c.power_veto_modify != 'none'
+                OR c.deck_peek = 1)
         ");
         $stmt->execute([$gameId, $playerId]);
         $powerModifiers = $stmt->fetchAll();
@@ -1107,6 +1190,12 @@ function storeChallengeCard($gameId, $playerId, $slotNumber) {
         $today = (new DateTime('now', $timezone))->format('Y-m-d');
         
         $pdo->beginTransaction();
+
+        // Check hand space
+        $handCount = getPlayerHandCount($gameId, $playerId);
+        if ($handCount >= 10) {
+            throw new Exception("Hand is full, cannot store challenge.");
+        }
         
         // Check if player has bypass expiration power
         $stmt = $pdo->prepare("
@@ -1193,11 +1282,15 @@ function peekDailyDeck($gameId, $playerId) {
             FROM daily_deck_cards ddc
             JOIN daily_decks dd ON ddc.deck_id = dd.id
             JOIN cards c ON ddc.card_id = c.id
-            WHERE dd.game_id = ? AND dd.player_id = ? AND dd.deck_date = ? AND ddc.is_used = 0
+            WHERE dd.game_id = ? AND dd.player_id = ? AND dd.deck_date = ? 
+            AND ddc.is_used = 0 AND dd.id NOT IN (
+                SELECT DISTINCT deck_id FROM daily_deck_slots dds 
+                WHERE dds.game_id = ? AND dds.player_id = ? AND dds.deck_date = ? AND dds.card_id IS NOT NULL
+            )
             ORDER BY RAND()
             LIMIT 3
         ");
-        $stmt->execute([$gameId, $playerId, $today]);
+        $stmt->execute([$gameId, $playerId, $today, $gameId, $playerId, $today]);
         $cards = $stmt->fetchAll();
         
         // Remove deck peek power after use

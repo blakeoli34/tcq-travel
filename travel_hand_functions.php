@@ -507,7 +507,7 @@ function vetoStoredChallenge($gameId, $playerId, $playerCardId) {
 
         // Check if veto would draw cards but hand is full
         $handCount = getPlayerHandCount($gameId, $playerId);
-        if ($handCount >= 6 && ($card['veto_snap'] || $card['veto_spicy'])) {
+        if ($handCount >= 10 && ($card['veto_snap'] || $card['veto_spicy'])) {
             throw new Exception("Cannot veto: hand is full and this would draw additional cards");
         }
         
@@ -587,8 +587,8 @@ function drawFromSnapDeck($gameId, $playerId) {
         
         // Check hand space
         $handCount = getPlayerHandCount($gameId, $playerId);
-        if ($handCount >= 6) {
-            return ['success' => false, 'message' => 'Hand is full (6 cards maximum)'];
+        if ($handCount >= 10) {
+            return ['success' => false, 'message' => 'Hand is full (10 cards maximum)'];
         }
         
         // Get player gender and travel mode
@@ -669,8 +669,8 @@ function drawFromSpicyDeck($gameId, $playerId) {
         
         // Check hand space
         $handCount = getPlayerHandCount($gameId, $playerId);
-        if ($handCount >= 6) {
-            return ['success' => false, 'message' => 'Hand is full (6 cards maximum)'];
+        if ($handCount >= 10) {
+            return ['success' => false, 'message' => 'Hand is full (10 cards maximum)'];
         }
         
         // Get player gender and travel mode
@@ -919,13 +919,6 @@ function clearCursesByCompletion($gameId, $playerId, $completionType) {
             $placeholders = str_repeat('?,', count($effectIds) - 1) . '?';
             $stmt = $pdo->prepare("DELETE FROM active_curse_effects WHERE id IN ($placeholders)");
             $stmt->execute($effectIds);
-            
-            // Clear curse slots
-            foreach ($effects as $effect) {
-                if ($effect['slot_number']) {
-                    completeCurseSlot($gameId, $playerId, $effect['slot_number']);
-                }
-            }
         }
         
         return count($effects);
@@ -947,13 +940,6 @@ function clearPlayerCurseEffects($gameId, $playerId) {
         
         $stmt = $pdo->prepare("DELETE FROM active_curse_effects WHERE game_id = ? AND player_id = ?");
         $stmt->execute([$gameId, $playerId]);
-        
-        // Clear curse slots
-        foreach ($slotNumbers as $slotNumber) {
-            if ($slotNumber) {
-                completeCurseSlot($gameId, $playerId, $slotNumber);
-            }
-        }
         
         return $stmt->rowCount();
         

@@ -329,6 +329,37 @@ function createTimer($gameId, $playerId, $description, $durationMinutes) {
     }
 }
 
+function createSiphonTimer($gameId, $playerId, $cardName, $repeatMinutes, $scoreSubtract, $completionType) {
+    try {
+        $pdo = Config::getDatabaseConnection();
+        
+        $startTime = new DateTime('now', new DateTimeZone('UTC'));
+        $endTime = clone $startTime;
+        $endTime->add(new DateInterval('PT' . ($repeatMinutes * 60) . 'S'));
+        
+        $stmt = $pdo->prepare("
+            INSERT INTO timers (game_id, player_id, description, duration_minutes, start_time, end_time, timer_type, score_subtract, completion_type) 
+            VALUES (?, ?, ?, ?, ?, ?, 'siphon', ?, ?)
+        ");
+        $stmt->execute([
+            $gameId, 
+            $playerId, 
+            "Siphon: {$cardName}", 
+            $repeatMinutes, 
+            $startTime->format('Y-m-d H:i:s'), 
+            $endTime->format('Y-m-d H:i:s'),
+            $scoreSubtract,
+            $completionType
+        ]);
+        
+        return ['success' => true, 'timer_id' => $pdo->lastInsertId()];
+        
+    } catch (Exception $e) {
+        error_log("Error creating siphon timer: " . $e->getMessage());
+        return ['success' => false];
+    }
+}
+
 function getActiveTimers($gameId) {
     try {
         $pdo = Config::getDatabaseConnection();
