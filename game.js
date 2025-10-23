@@ -13,6 +13,7 @@ let scoreBugExpanded = false;
 let refreshInterval = null;
 let slideoutTimeout = null;
 let waitCountdownInterval = null;
+let autoCurseInterval = null;
 
 // Sound management
 let actionSound = new Audio('data:audio/mpeg;base64,SUQzBAAAAAABEVRYWFgAAAAtAAADY29tbWVudABCaWdTb3VuZEJhbmsuY29tIC8gTGFTb25vdGhlcXVlLm9yZwBURU5DAAAAHQAAA1N3aXRjaCBQbHVzIMKpIE5DSCBTb2Z0d2FyZQBUSVQyAAAABgAAAzIyMzUAVFNTRQAAAA8AAANMYXZmNTcuODMuMTAwAAAAAAAAAAAAAAD/80DEAAAAA0gAAAAATEFNRTMuMTAwVVVVVVVVVVVVVUxBTUUzLjEwMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zQsRbAAADSAAAAABVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zQMSkAAADSAAAAABVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV');
@@ -674,15 +675,20 @@ function drawAllSlots() {
 }
 
 function startCurseAutoActivate(slotNumber) {
+    console.log('start auto activate countdown called');
+    if(autoCurseInterval) {
+        clearInterval(autoCurseInterval);
+        autoCurseInterval = null;
+    }
     let countdown = 10; // Changed from 5 to 10 seconds
     const badge = document.getElementById(`curse-auto-${slotNumber}`);
     
-    const interval = setInterval(() => {
+    autoCurseInterval = setInterval(() => {
         countdown--;
         if (badge) badge.textContent = `Activating in ${countdown}s...`;
         
         if (countdown <= 0) {
-            clearInterval(interval);
+            clearInterval(autoCurseInterval);
             if (badge) badge.remove();
             activateCurse(slotNumber);
         }
@@ -1257,6 +1263,17 @@ function toggleHandOverlay(event) {
     if (event) {
         event.stopPropagation();
         event.preventDefault();
+
+        // Close if clicking background (hand-overlay) but not deck-selector or hand-slots
+        if (event.target.classList.contains('hand-overlay')) {
+            if (handOverlayOpen) {
+                handOverlayOpen = false;
+                const overlay = document.getElementById('handOverlay');
+                overlay.classList.remove('active');
+                setOverlayActive(false);
+                return;
+            }
+        }
     }
     const overlay = document.getElementById('handOverlay');
     if (!overlay) return;
@@ -1472,9 +1489,6 @@ function playPowerCard(playerCardId) {
     .then(data => {
         if (data.success) {
             playSoundIfEnabled('/card-power.m4r');
-            if (data.effects && data.effects.length > 0) {
-                showInAppNotification('Power Played!', data.effects.join(', '));
-            }
             loadHandCards();
             setTimeout(() => {
                 refreshGameData();
@@ -1607,13 +1621,19 @@ function drawSnapCard() {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            const slots = document.querySelectorAll('.hand-slot.filled');
-            const lastSlot = slots[slots.length - 1];
-            lastSlot.classList.add('loading');
+            // Calculate which slot will get the new card
+            const currentCardCount = handCards.reduce((sum, card) => sum + card.quantity, 0);
+            const newCardSlotIndex = currentCardCount; // Next available slot
+            const slots = document.querySelectorAll('.hand-slot');
+            const targetSlot = slots[newCardSlotIndex];
+            if (targetSlot) targetSlot.classList.add('loading');
+
             loadHandCards();
             setTimeout(() => {
-                if (lastSlot && lastSlot.classList.contains('loading')) {
-                    animateHandCardIn(lastSlot);
+                const updatedSlots = document.querySelectorAll('.hand-slot');
+                const newSlot = updatedSlots[newCardSlotIndex];
+                if (newSlot && newSlot.classList.contains('filled')) {
+                    animateHandCardIn(newSlot);
                 }
             }, 200);
         } else {
@@ -1633,13 +1653,19 @@ function drawSpicyCard() {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            const slots = document.querySelectorAll('.hand-slot.filled');
-            const lastSlot = slots[slots.length - 1];
-            lastSlot.classList.add('loading');
+            // Calculate which slot will get the new card
+            const currentCardCount = handCards.reduce((sum, card) => sum + card.quantity, 0);
+            const newCardSlotIndex = currentCardCount; // Next available slot
+            const slots = document.querySelectorAll('.hand-slot');
+            const targetSlot = slots[newCardSlotIndex];
+            if (targetSlot) targetSlot.classList.add('loading');
+
             loadHandCards();
             setTimeout(() => {
-                if (lastSlot && lastSlot.classList.contains('loading')) {
-                    animateHandCardIn(lastSlot);
+                const updatedSlots = document.querySelectorAll('.hand-slot');
+                const newSlot = updatedSlots[newCardSlotIndex];
+                if (newSlot && newSlot.classList.contains('filled')) {
+                    animateHandCardIn(newSlot);
                 }
             }, 200);
         } else {

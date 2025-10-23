@@ -472,6 +472,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             }
             exit;
 
+        case 'list_deck_cards':
+            $timezone = new DateTimeZone('America/Indiana/Indianapolis');
+            $today = (new DateTime('now', $timezone))->format('Y-m-d');
+            
+            $stmt = $pdo->prepare("
+                SELECT c.card_name, c.card_category
+                FROM daily_deck_cards ddc
+                JOIN daily_decks dd ON ddc.deck_id = dd.id
+                JOIN cards c ON ddc.card_id = c.id
+                WHERE dd.game_id = ? AND dd.player_id = ? AND dd.deck_date = ? AND ddc.is_used = 0
+                ORDER BY c.card_category, c.card_name
+            ");
+            $stmt->execute([$player['game_id'], $player['id'], $today]);
+            $cards = $stmt->fetchAll();
+            
+            echo json_encode(['success' => true, 'cards' => $cards]);
+            exit;
+
         case 'get_daily_deck_count':
             if ($gameMode !== 'digital') {
                 echo json_encode(['success' => false, 'message' => 'Not a digital game']);
@@ -1325,6 +1343,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         }
     </style>
     <link rel="stylesheet" href="/game.css">
+    <?php switch ($travelModeClass) {
+        case 'cruise':
+            echo '<link rel="stylesheet" href="cruise.css">';
+            break;
+        case 'hotel':
+            echo '<link rel="stylesheet" href="hotel.css">';
+            break;
+    } ?>
 </head>
 <body class="<?php 
     $classes = [];
@@ -1385,6 +1411,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             <div class="ship-funnel funnel-2"></div>
             <div class="smoke"></div>
             <div class="smoke"></div>
+        </div>
+    </div>
+    <div class="background-container hotel">
+        <!-- Sky -->
+        <div class="sky" id="sky">
+            <!-- Sun -->
+            <div class="sun" id="sun"></div>
+            
+            <!-- Moon -->
+            <div class="moon" id="moon"></div>
+            
+            <!-- Clouds -->
+            <div class="clouds">
+                <div class="cloud cloud1" id="cloud1"></div>
+                <div class="cloud cloud2" id="cloud2"></div>
+                <div class="cloud cloud3" id="cloud3"></div>
+            </div>
+        </div>
+        
+        <!-- Ground -->
+        <div class="ground" id="ground"></div>
+
+        <!-- Hotel Building -->
+        <div class="hotel-container">
+            <div class="building" id="building">
+                <div class="elevator-shaft" id="elevatorShaft">
+                    <div class="elevator" id="elevator"></div>
+                </div>
+                <div class="windows" id="windows"></div>
+                <div class="entrance" id="entrance"></div>
+            </div>
         </div>
     </div>
     <div class="container">
@@ -1569,10 +1626,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             </div>
             
             <!-- Hand Overlay (swipes down from top) -->
-            <div class="hand-overlay" id="handOverlay">
+            <div class="hand-overlay" id="handOverlay" onclick="toggleHandOverlay(event)">
                 <div class="hand-content">
                     <!-- Draw Decks -->
-                    <div class="deck-selector">
+                    <div class="deck-selector" onclick="event.stopPropagation()">
                         <div class="deck-option snap-deck" onclick="drawSnapCard()">
                             <div class="deck-header">
                                 <div class="deck-title">
@@ -1595,7 +1652,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     </div>
                     
                     <!-- 10 Card Slots Display -->
-                    <div class="hand-slots" id="handSlots">
+                    <div class="hand-slots" id="handSlots" onclick="event.stopPropagation()">
                         <div class="hand-slot empty" data-slot="1">
                             <div class="empty-slot-indicator">Empty</div>
                         </div>
@@ -2011,5 +2068,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     <script src="https://www.gstatic.com/firebasejs/9.0.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.0.0/firebase-messaging-compat.js"></script>
     <script src="/game.js"></script>
+    <?php switch ($travelModeClass) {
+        case 'hotel':
+            echo '<script src="hotel.js"></script>';
+            break;
+    } ?>
 </body>
 </html>

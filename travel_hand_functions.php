@@ -25,8 +25,8 @@ function playPowerCard($gameId, $playerId, $playerCardId) {
         
         // Apply immediate effects
         if ($card['power_score_add']) {
-            // Only apply instantly if no snap/spicy modify
-            if (!$card['power_snap_modify'] && !$card['power_spicy_modify']) {
+            // Only apply instantly if no challenge/snap/spicy modify
+            if (!$card['power_snap_modify'] && !$card['power_spicy_modify'] && !$card['power_challenge_modify']) {
                 updateScore($gameId, $targetPlayerId, $card['power_score_add'], $playerId);
                 $targetName = $card['target_opponent'] ? "Opponent gained" : "Gained";
                 $effects[] = "{$targetName} {$card['power_score_add']} points";
@@ -50,6 +50,7 @@ function playPowerCard($gameId, $playerId, $playerCardId) {
         // Apply wait to target
         if ($card['power_wait']) {
             applyVetoWait($gameId, $targetPlayerId, $card['power_wait']);
+            sendPushNotification($targetPlayerId, "You Must Wait", "Your opponent just used a Power card to make you wait for {$card['power_wait']} minutes.");
             $targetName = $card['target_opponent'] ? "Opponent" : "You";
             $effects[] = "{$targetName} cannot interact with deck for {$card['power_wait']} minutes";
         }
@@ -80,7 +81,8 @@ function playPowerCard($gameId, $playerId, $playerCardId) {
         // Create ongoing effects if needed
         if ($card['power_challenge_modify'] || $card['power_snap_modify'] || 
             $card['power_spicy_modify'] || $card['power_score_modify'] !== 'none' ||
-            $card['power_veto_modify'] !== 'none' || $card['power_wait']) {
+            $card['power_veto_modify'] !== 'none' || $card['skip_challenge'] ||
+            $card['deck_peek'] || $card['card_swap'] || $card['bypass_expiration']) {
             
             addActivePowerEffect($gameId, $playerId, $card['card_id'], $card);
             $effects[] = "Ongoing power effect activated";
@@ -377,6 +379,27 @@ function vetoSnapSpicyCard($gameId, $playerId, $playerCardId, $cardType) {
         $stmt->execute([$gameId, $playerId]);
         $hasVetoSkip = $stmt->fetchColumn() > 0;
 
+        // Check for veto double effects from curses
+        $stmt = $pdo->prepare("
+            SELECT ace.*, c.card_name 
+            FROM active_curse_effects ace
+            JOIN cards c ON ace.card_id = c.id
+            WHERE ace.game_id = ? AND ace.player_id = ? AND c.veto_modify = 'double'
+        ");
+        $stmt->execute([$gameId, $playerId]);
+        $vetoDoubleEffects = $stmt->fetchAll();
+
+        $vetoMultiplier = 1;
+        if (!empty($vetoDoubleEffects)) {
+            $vetoMultiplier = 2;
+            
+            // Remove the veto double effects after use
+            foreach ($vetoDoubleEffects as $effect) {
+                $stmt = $pdo->prepare("DELETE FROM active_curse_effects WHERE id = ?");
+                $stmt->execute([$effect['id']]);
+            }
+        }
+
         if ($hasVetoSkip) {
             $penalties[] = "Veto penalties skipped";
             
@@ -388,22 +411,25 @@ function vetoSnapSpicyCard($gameId, $playerId, $playerCardId, $cardType) {
             ");
             $stmt->execute([$gameId, $playerId]);
         } else {
-            // Apply veto penalties (existing code)
+            // Apply veto penalties with multiplier
             if ($card['veto_subtract']) {
-                updateScore($gameId, $playerId, -$card['veto_subtract'], $playerId);
-                $penalties[] = "Lost {$card['veto_subtract']} points";
+                $penalty = $card['veto_subtract'] * $vetoMultiplier;
+                updateScore($gameId, $playerId, -$penalty, $playerId);
+                $penalties[] = "Lost {$penalty} points";
             }
-            
+
             if ($card['veto_steal']) {
+                $penalty = $card['veto_steal'] * $vetoMultiplier;
                 $opponentId = getOpponentPlayerId($gameId, $playerId);
-                updateScore($gameId, $playerId, -$card['veto_steal'], $playerId);
-                updateScore($gameId, $opponentId, $card['veto_steal'], $playerId);
-                $penalties[] = "Lost {$card['veto_steal']} points to opponent";
+                updateScore($gameId, $playerId, -$penalty, $playerId);
+                updateScore($gameId, $opponentId, $penalty, $playerId);
+                $penalties[] = "Lost {$penalty} points to opponent";
             }
-            
+
             if ($card['veto_wait']) {
-                applyVetoWait($gameId, $playerId, $card['veto_wait']);
-                $penalties[] = "Cannot interact with deck for {$card['veto_wait']} minutes";
+                $penalty = $card['veto_wait'] * $vetoMultiplier;
+                applyVetoWait($gameId, $playerId, $penalty);
+                $penalties[] = "Cannot interact with deck for {$penalty} minutes";
             }
         }
         
@@ -522,6 +548,27 @@ function vetoStoredChallenge($gameId, $playerId, $playerCardId) {
         $stmt->execute([$gameId, $playerId]);
         $hasVetoSkip = $stmt->fetchColumn() > 0;
 
+        // Check for veto double effects from curses
+        $stmt = $pdo->prepare("
+            SELECT ace.*, c.card_name 
+            FROM active_curse_effects ace
+            JOIN cards c ON ace.card_id = c.id
+            WHERE ace.game_id = ? AND ace.player_id = ? AND c.veto_modify = 'double'
+        ");
+        $stmt->execute([$gameId, $playerId]);
+        $vetoDoubleEffects = $stmt->fetchAll();
+
+        $vetoMultiplier = 1;
+        if (!empty($vetoDoubleEffects)) {
+            $vetoMultiplier = 2;
+            
+            // Remove the veto double effects after use
+            foreach ($vetoDoubleEffects as $effect) {
+                $stmt = $pdo->prepare("DELETE FROM active_curse_effects WHERE id = ?");
+                $stmt->execute([$effect['id']]);
+            }
+        }
+
         if ($hasVetoSkip) {
             $penalties[] = "Veto penalties skipped";
             
@@ -533,32 +580,37 @@ function vetoStoredChallenge($gameId, $playerId, $playerCardId) {
             ");
             $stmt->execute([$gameId, $playerId]);
         } else {
-            // Apply veto penalties (existing code)
+            // Apply veto penalties with multiplier
             if ($card['veto_subtract']) {
-                updateScore($gameId, $playerId, -$card['veto_subtract'], $playerId);
-                $penalties[] = "Lost {$card['veto_subtract']} points";
+                $penalty = $card['veto_subtract'] * $vetoMultiplier;
+                updateScore($gameId, $playerId, -$penalty, $playerId);
+                $penalties[] = "Lost {$penalty} points";
             }
-            
+
             if ($card['veto_steal']) {
+                $penalty = $card['veto_steal'] * $vetoMultiplier;
                 $opponentId = getOpponentPlayerId($gameId, $playerId);
-                updateScore($gameId, $playerId, -$card['veto_steal'], $playerId);
-                updateScore($gameId, $opponentId, $card['veto_steal'], $playerId);
-                $penalties[] = "Lost {$card['veto_steal']} points to opponent";
+                updateScore($gameId, $playerId, -$penalty, $playerId);
+                updateScore($gameId, $opponentId, $penalty, $playerId);
+                $penalties[] = "Lost {$penalty} points to opponent";
             }
-            
+
             if ($card['veto_wait']) {
-                applyVetoWait($gameId, $playerId, $card['veto_wait']);
-                $penalties[] = "Cannot interact with deck for {$card['veto_wait']} minutes";
+                $penalty = $card['veto_wait'] * $vetoMultiplier;
+                applyVetoWait($gameId, $playerId, $penalty);
+                $penalties[] = "Cannot interact with deck for {$penalty} minutes";
             }
-            
+
             if ($card['veto_snap']) {
-                addSnapCards($gameId, $playerId, $card['veto_snap']);
-                $penalties[] = "Drew {$card['veto_snap']} snap card(s)";
+                $penalty = $card['veto_snap'] * $vetoMultiplier;
+                addSnapCards($gameId, $playerId, $penalty);
+                $penalties[] = "Drew {$penalty} snap card(s)";
             }
-            
+
             if ($card['veto_spicy']) {
-                addSpicyCards($gameId, $playerId, $card['veto_spicy']);
-                $penalties[] = "Drew {$card['veto_spicy']} spicy card(s)";
+                $penalty = $card['veto_spicy'] * $vetoMultiplier;
+                addSpicyCards($gameId, $playerId, $penalty);
+                $penalties[] = "Drew {$penalty} spicy card(s)";
             }
         }
         

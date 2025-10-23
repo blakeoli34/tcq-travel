@@ -128,6 +128,27 @@ function vetoChallenge($gameId, $playerId, $slotNumber) {
         $stmt->execute([$gameId, $playerId]);
         $hasVetoSkip = $stmt->fetchColumn() > 0;
 
+        // Check for veto double curse
+        $stmt = $pdo->prepare("
+            SELECT ace.*, c.card_name 
+            FROM active_curse_effects ace
+            JOIN cards c ON ace.card_id = c.id
+            WHERE ace.game_id = ? AND ace.player_id = ? AND c.veto_modify = 'double'
+        ");
+        $stmt->execute([$gameId, $playerId]);
+        $vetoDoubleEffects = $stmt->fetchAll();
+
+        $vetoMultiplier = 1;
+        if (!empty($vetoDoubleEffects)) {
+            $vetoMultiplier = 2;
+            
+            // Remove the veto double effects after use
+            foreach ($vetoDoubleEffects as $effect) {
+                $stmt = $pdo->prepare("DELETE FROM active_curse_effects WHERE id = ?");
+                $stmt->execute([$effect['id']]);
+            }
+        }
+
         if ($hasVetoSkip) {
             $penalties[] = "Veto penalties skipped";
             
@@ -139,32 +160,37 @@ function vetoChallenge($gameId, $playerId, $slotNumber) {
             ");
             $stmt->execute([$gameId, $playerId]);
         } else {
-            // Apply veto penalties (existing code)
+            // Apply veto penalties with multiplier
             if ($card['veto_subtract']) {
-                updateScore($gameId, $playerId, -$card['veto_subtract'], $playerId);
-                $penalties[] = "Lost {$card['veto_subtract']} points";
+                $penalty = $card['veto_subtract'] * $vetoMultiplier;
+                updateScore($gameId, $playerId, -$penalty, $playerId);
+                $penalties[] = "Lost {$penalty} points";
             }
-            
+
             if ($card['veto_steal']) {
+                $penalty = $card['veto_steal'] * $vetoMultiplier;
                 $opponentId = getOpponentPlayerId($gameId, $playerId);
-                updateScore($gameId, $playerId, -$card['veto_steal'], $playerId);
-                updateScore($gameId, $opponentId, $card['veto_steal'], $playerId);
-                $penalties[] = "Lost {$card['veto_steal']} points to opponent";
+                updateScore($gameId, $playerId, -$penalty, $playerId);
+                updateScore($gameId, $opponentId, $penalty, $playerId);
+                $penalties[] = "Lost {$penalty} points to opponent";
             }
-            
+
             if ($card['veto_wait']) {
-                applyVetoWait($gameId, $playerId, $card['veto_wait']);
-                $penalties[] = "Cannot interact with deck for {$card['veto_wait']} minutes";
+                $penalty = $card['veto_wait'] * $vetoMultiplier;
+                applyVetoWait($gameId, $playerId, $penalty);
+                $penalties[] = "Cannot interact with deck for {$penalty} minutes";
             }
-            
+
             if ($card['veto_snap']) {
-                addSnapCards($gameId, $playerId, $card['veto_snap']);
-                $penalties[] = "Drew {$card['veto_snap']} snap card(s)";
+                $penalty = $card['veto_snap'] * $vetoMultiplier;
+                addSnapCards($gameId, $playerId, $penalty);
+                $penalties[] = "Drew {$penalty} snap card(s)";
             }
-            
+
             if ($card['veto_spicy']) {
-                addSpicyCards($gameId, $playerId, $card['veto_spicy']);
-                $penalties[] = "Drew {$card['veto_spicy']} spicy card(s)";
+                $penalty = $card['veto_spicy'] * $vetoMultiplier;
+                addSpicyCards($gameId, $playerId, $penalty);
+                $penalties[] = "Drew {$penalty} spicy card(s)";
             }
         }
         
@@ -520,6 +546,7 @@ function activatePowerFromSlot($gameId, $playerId, $slotNumber) {
         
         if ($card['power_wait']) {
             applyVetoWait($gameId, $targetPlayerId, $card['power_wait']);
+            sendPushNotification($targetPlayerId, "You Must Wait", "Your opponent just used a Power card to make you wait for {$card['power_wait']} minutes.");
             $targetName = $card['target_opponent'] ? "Opponent" : "You";
             $effects[] = "{$targetName} cannot interact with deck for {$card['power_wait']} minutes";
         }
@@ -779,7 +806,7 @@ function applyModifiersToChallenge($gameId, $playerId, $basePoints) {
             SELECT ape.*, c.power_score_modify
             FROM active_power_effects ape
             JOIN cards c ON ape.power_card_id = c.id
-            WHERE ape.game_id = ? AND ape.player_id = ? AND c.power_challenge_modify = 1 AND c.power_score_modify != 'none'
+            WHERE ape.game_id = ? AND ape.player_id = ? AND c.power_challenge_modify = 1 AND c.power_score_modify != 'none' AND c.target_opponent = 0
         ");
         $stmt->execute([$gameId, $playerId]);
         $powerModifyEffects = $stmt->fetchAll();
@@ -821,6 +848,19 @@ function applyModifiersToChallenge($gameId, $playerId, $basePoints) {
         ");
         $stmt->execute([$gameId, $playerId]);
         $effects = $stmt->fetchAll();
+
+        // Get opponent power effects that target this player
+        $opponentId = getOpponentPlayerId($gameId, $playerId);
+        $stmt = $pdo->prepare("
+            SELECT ape.*, c.power_score_modify as score_modify
+            FROM active_power_effects ape
+            JOIN cards c ON ape.power_card_id = c.id
+            WHERE ape.game_id = ? AND ape.player_id = ? AND c.power_challenge_modify = 1 AND c.target_opponent = 1
+        ");
+        $stmt->execute([$gameId, $opponentId]);
+        $opponentPowerEffects = $stmt->fetchAll();
+
+        $effects = array_merge($effects, $opponentPowerEffects);
         
         foreach ($effects as $effect) {
             switch ($effect['score_modify']) {
@@ -864,6 +904,14 @@ function clearChallengeModifiers($gameId, $playerId) {
             WHERE ace.game_id = ? AND ace.player_id = ? AND c.challenge_modify = 1
         ");
         $stmt->execute([$gameId, $playerId]);
+
+        $opponentId = getOpponentPlayerId($gameId, $playerId);
+        $stmt = $pdo->prepare("
+            DELETE ape FROM active_power_effects ape
+            JOIN cards c ON ape.power_card_id = c.id
+            WHERE ape.game_id = ? AND ape.player_id = ? AND c.power_challenge_modify = 1 AND c.target_opponent = 1
+        ");
+        $stmt->execute([$gameId, $opponentId]);
         
         return true;
         
@@ -884,7 +932,7 @@ function processCurseCard($gameId, $playerId, $card) {
     }
     
     if ($card['score_subtract']) {
-        if ($card['repeat_count'] && $card['timer_completion_type']) {
+        if ($card['repeat_count'] && $card['timer_completion_type'] !== 'timer_expires') {
             // This is a siphon card - don't subtract immediately, handle in recurring section
             $isInstant = false;
         } else {
@@ -1164,7 +1212,7 @@ function getActiveModifiers($gameId, $playerId) {
                 c.deck_peek, 'power' as type
             FROM active_power_effects ape
             JOIN cards c ON ape.power_card_id = c.id
-            WHERE ape.game_id = ? AND ape.player_id = ? 
+            WHERE ape.game_id = ? AND ape.player_id = ? AND c.target_opponent = 0
             AND (c.power_challenge_modify = 1 OR c.power_snap_modify = 1 OR c.power_spicy_modify = 1 
                 OR c.skip_challenge = 1 OR c.bypass_expiration = 1 OR c.power_veto_modify != 'none'
                 OR c.deck_peek = 1)
@@ -1172,9 +1220,24 @@ function getActiveModifiers($gameId, $playerId) {
         $stmt->execute([$gameId, $playerId]);
         $powerModifiers = $stmt->fetchAll();
         
+        // Get opponent power modifiers that target this player
+        $opponentId = getOpponentPlayerId($gameId, $playerId);
+        $stmt = $pdo->prepare("
+            SELECT c.card_name, c.power_challenge_modify as challenge_modify, 
+                c.power_snap_modify as snap_modify, c.power_spicy_modify as spicy_modify, 
+                c.skip_challenge, c.bypass_expiration, c.power_veto_modify as veto_modify, 'power' as type
+            FROM active_power_effects ape
+            JOIN cards c ON ape.power_card_id = c.id
+            WHERE ape.game_id = ? AND ape.player_id = ? AND c.target_opponent = 1
+            AND (c.power_challenge_modify = 1 OR c.power_snap_modify = 1 OR c.power_spicy_modify = 1 
+                OR c.skip_challenge = 1 OR c.bypass_expiration = 1 OR c.power_veto_modify != 'none')
+        ");
+        $stmt->execute([$gameId, $opponentId]);
+        $opponentTargetingModifiers = $stmt->fetchAll();
+
         return [
             'success' => true,
-            'modifiers' => array_merge($curseModifiers, $powerModifiers)
+            'modifiers' => array_merge($curseModifiers, $powerModifiers, $opponentTargetingModifiers)
         ];
         
     } catch (Exception $e) {

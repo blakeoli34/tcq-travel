@@ -422,6 +422,26 @@ function sendPushNotification($fcmToken, $title, $body, $data = [], $retryCount 
         return false;
     }
 
+    // Check if first arg is playerId (less than 10 characters)
+    if (!empty($fcmToken) && strlen($fcmToken) < 10) {
+        try {
+            $pdo = Config::getDatabaseConnection();
+            $stmt = $pdo->prepare("SELECT fcm_token FROM players WHERE id = ?");
+            $stmt->execute([$fcmToken]);
+            $token = $stmt->fetchColumn();
+            
+            if ($token) {
+                $fcmToken = $token;
+            } else {
+                error_log("FCM: No token found for playerId: {$fcmToken}");
+                return false;
+            }
+        } catch (Exception $e) {
+            error_log("FCM: Error looking up token for playerId {$fcmToken}: " . $e->getMessage());
+            return false;
+        }
+    }
+
     // Basic token validation
     if (strlen($fcmToken) < 50 || strlen($fcmToken) > 500) {
         error_log("FCM: Invalid token length");
