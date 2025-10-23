@@ -1702,7 +1702,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 </div>
 
                 <div class="curse-block-overlay" id="curseBlockOverlay" style="display: none;">
-                    <div class="curse-block-message" id="curseBlockMessage">Curse Active</div>
+                    <div class="curse-block-message" id="curseBlockMessage"><i class="fa-solid fa-skull-crossbones"></i> Curse Active</div>
                     <div class="curse-block-requirement" id="curseBlockRequirement">Complete a snap card to clear this curse</div>
                 </div>
 
@@ -1869,14 +1869,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             </div>
 
             <!-- Curse Timers -->
-            <div class="curse-timer left" id="opponentCurseTimer" style="display: none;" onclick="showActiveEffectsPopover()">
-                <i class="fa-solid fa-skull-crossbones"></i>
-                <span id="playerCurseTime">0:00</span>
-            </div>
-
-            <div class="curse-timer right" id="playerCurseTimer" style="display: none;" onclick="showActiveEffectsPopover()">
+            <div class="curse-timer left" id="opponentCurseTimer">
                 <i class="fa-solid fa-skull-crossbones"></i>
                 <span id="opponentCurseTime">0:00</span>
+            </div>
+
+            <div class="curse-timer right" id="playerCurseTimer">
+                <i class="fa-solid fa-skull-crossbones"></i>
+                <span id="playerCurseTime">0:00</span>
             </div>
             
             <!-- Pass game data to JavaScript -->

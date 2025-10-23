@@ -954,6 +954,7 @@ function clearCursesByCompletion($gameId, $playerId, $completionType) {
         
         $completionField = 'complete_' . $completionType;
         $modifyField = $completionType . '_modify';
+        $timerIdToDelete = NULL;
         
         // Get curses that require this card type to be completed OR modify this card type
         $stmt = $pdo->prepare("
@@ -965,6 +966,24 @@ function clearCursesByCompletion($gameId, $playerId, $completionType) {
         ");
         $stmt->execute([$gameId, $playerId]);
         $effects = $stmt->fetchAll();
+
+        if($completionType === 'snap') {
+            $stmt = $pdo->prepare("
+                SELECT id FROM timers WHERE game_id = ? AND player_id = ? AND timer_type = 'siphon' AND completion_type = 'first_trigger_any'
+            ");
+            $timerIdToDelete = $stmt->execute([$gameId, $playerId]);
+        }
+
+        if($completionType === 'spicy') {
+            $stmt = $pdo->prepare("
+                SELECT id FROM timers WHERE game_id = ? AND player_id = ? AND timer_type = 'siphon'
+            ");
+            $timerIdToDelete = $stmt->execute([$gameId, $playerId]);
+        }
+
+        if($timerIdToDelete !== NULL) {
+            deleteTimer($timerIdToDelete, $gameId);
+        }
         
         if (!empty($effects)) {
             $effectIds = array_column($effects, 'id');

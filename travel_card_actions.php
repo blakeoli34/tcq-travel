@@ -373,6 +373,7 @@ function activateCurse($gameId, $playerId, $slotNumber) {
         // Create active curse effect only if not instant
         $effectId = null;
         if (!$curseResult['is_instant']) {
+            error_log('is instant boolean not found, adding active effect');
             $effectId = addActiveCurseEffect($gameId, $playerId, $card['card_id'], $card, $slotNumber, $curseResult['timer_id'] ?? null);
         }
 
@@ -905,6 +906,15 @@ function clearChallengeModifiers($gameId, $playerId) {
         ");
         $stmt->execute([$gameId, $playerId]);
 
+        $stmt = $pdo->prepare("
+            SELECT id FROM timers WHERE game_id = ? AND player_id = ? AND timer_type = 'siphon' AND completion_type = 'first_trigger_any'
+        ");
+        $timerIdToDelete = $stmt->execute([$gameId, $playerId]);
+
+        if($timerIdToDelete) {
+            deleteTimer($timerIdToDelete, $gameId);
+        }
+
         $opponentId = getOpponentPlayerId($gameId, $playerId);
         $stmt = $pdo->prepare("
             DELETE ape FROM active_power_effects ape
@@ -956,10 +966,11 @@ function processCurseCard($gameId, $playerId, $card) {
     }
     
     // Check for ongoing effects
-    if ($card['challenge_modify'] || $card['snap_modify'] || $card['spicy_modify'] || $card['veto_modify'] || 
+    if ($card['challenge_modify'] || $card['snap_modify'] || $card['spicy_modify'] || $card['veto_modify'] !== 'none' || 
         $card['timer'] || $card['repeat_count'] || $card['roll_dice'] || 
         $card['complete_snap'] || $card['complete_spicy']) {
         $isInstant = false;
+        error_log('curse will be ongoing');
     }
     
     // Timer effects
@@ -987,6 +998,7 @@ function processCurseCard($gameId, $playerId, $card) {
     
     // Dice effects
     if ($card['roll_dice']) {
+        error_log('dice roll required');
         $effects[] = "Roll dice to determine if curse is cleared";
         
         // Add to active effects first, then return special flag to trigger dice roll
@@ -1030,7 +1042,7 @@ function addActiveCurseEffect($gameId, $playerId, $cardId, $card, $slotNumber = 
         
         $expiresAt = null;
         if ($card['timer']) {
-            $timezone = new DateTimeZone('America/Indiana/Indianapolis');
+            $timezone = new DateTimeZone('UTC');
             $expiresAt = (new DateTime('now', $timezone))
                 ->add(new DateInterval('PT' . $card['timer'] . 'M'))
                 ->format('Y-m-d H:i:s');
@@ -1138,7 +1150,7 @@ function skipChallenge($gameId, $playerId, $slotNumber) {
 function getCurseTimers($gameId, $playerId, $opponentId) {
     try {
         $pdo = Config::getDatabaseConnection();
-        $timezone = new DateTimeZone('America/Indiana/Indianapolis');
+        $timezone = new DateTimeZone('UTC');
         
         // Get player curse timer with card name
         $stmt = $pdo->prepare("
@@ -1167,13 +1179,11 @@ function getCurseTimers($gameId, $playerId, $opponentId) {
         // Convert to UTC for JavaScript
         if ($playerTimer && $playerTimer['expires_at']) {
             $expires = new DateTime($playerTimer['expires_at'], $timezone);
-            $expires->setTimezone(new DateTimeZone('UTC'));
             $playerTimer['expires_at'] = $expires->format('Y-m-d\TH:i:s.000\Z');
         }
         
         if ($opponentTimer && $opponentTimer['expires_at']) {
             $expires = new DateTime($opponentTimer['expires_at'], $timezone);
-            $expires->setTimezone(new DateTimeZone('UTC'));
             $opponentTimer['expires_at'] = $expires->format('Y-m-d\TH:i:s.000\Z');
         }
         

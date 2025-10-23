@@ -543,22 +543,21 @@ body.hotel .background-container.hotel {
     left: 0;
     width: 100%;
     height: 100%;
-    background: rgba(103, 89, 122, 0.95);
     z-index: 10;
     display: none;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    border-radius: 20px;
 }
 
 .curse-block-message {
     color: white;
-    font-size: 20px;
+    font-size: 24px;
     font-weight: 700;
     margin-bottom: 15px;
     text-align: center;
     padding: 0 20px;
+    text-shadow: 0 0 10px rgba(0,0,0,0.2);
 }
 
 .curse-block-requirement {
@@ -567,6 +566,7 @@ body.hotel .background-container.hotel {
     font-weight: 400;
     text-align: center;
     padding: 0 20px;
+    text-shadow: 0 0 10px rgba(0,0,0,0.2);
 }
 
 .daily-slots {
@@ -889,7 +889,7 @@ body.hotel .background-container.hotel {
 
 .score-bug.expanded {
     height: 120px;
-    width: 90% !important;
+    width: 95% !important;
     overflow: hidden;
 }
 
@@ -912,7 +912,7 @@ body.hotel .background-container.hotel {
     width: 100%;
     display: flex;
     position: relative;
-    padding: 8px 40px;
+    padding: 8px 44px;
 }
 
 .player-score-section {
@@ -921,6 +921,7 @@ body.hotel .background-container.hotel {
     align-items: center;
     flex: 1;
     min-width: 0;
+    margin: 0 4px;
 }
 
 .player-name {
@@ -1757,25 +1758,43 @@ body.hotel .background-container.hotel {
 
 .curse-timer {
     position: fixed;
-    bottom: 140px;
+    bottom: 180px;
     background: rgba(103, 89, 122, 0.9);
     color: white;
-    padding: 8px 12px;
-    border-radius: 15px;
+    padding: 8px 0px;
+    border-radius: 15px 15px 0 0;
     font-size: 12px;
     font-weight: 600;
-    cursor: pointer;
+    pointer-events: none;
     z-index: 999;
     backdrop-filter: blur(8px);
     border: 2px solid rgba(103, 89, 122, 1);
+    width: 100px;
+    text-align: center;
+    transition: all 0.4s;
+    opacity: 0;
+}
+
+.curse-timer.active {
+    opacity: 1;
 }
 
 .curse-timer.left {
-    left: 20px;
+    left: -70px;
+    transform: rotate(90deg);
+}
+
+.curse-timer.left.active {
+    left: -34px;
 }
 
 .curse-timer.right {
-    right: 20px;
+    right: -70px;
+    transform: rotate(-90deg);
+}
+
+.curse-timer.right.active {
+    right: -34px;
 }
 
 .curse-timer i {
@@ -1789,7 +1808,7 @@ body.hotel .background-container.hotel {
     }
 
     .score-bug {
-        background: rgba(25,25,25,0.9);
+        background: rgba(25,25,25,0.7);
         border-color: #222;
     }
 
@@ -1850,7 +1869,7 @@ body.hotel .background-container.hotel {
     }
 
     .mode-btn {
-        background: rgba(25,25,25,0.9);
+        background: rgba(25,25,25,0.7);
         border-color: #555;
     }
     
@@ -1868,7 +1887,7 @@ body.hotel .background-container.hotel {
     }
 
     .custom-date-picker {
-        background: rgba(25,25,25,0.9);
+        background: rgba(25,25,25,0.7);
         border-color: #555;
     }
     
@@ -1880,7 +1899,7 @@ body.hotel .background-container.hotel {
 
     .iAN,
     .game-timer-hand {
-        background: rgba(25,25,25,0.9);
+        background: rgba(25,25,25,0.7);
         border-color: #222;
         color: #e2e2e2;
     }

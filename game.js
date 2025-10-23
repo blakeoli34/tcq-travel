@@ -95,6 +95,9 @@ $(document).ready(function() {
         if (!document.hidden) {
             updateAppBadge(0);
         }
+        if (document.hidden) {
+            setScorebugWidth();
+        }
     });
 
     // Touch gesture handling for hand overlay
@@ -431,12 +434,12 @@ function updateCurseTimerDisplay(timerId, timeSpanId, timerData) {
             const minutes = Math.floor(diff / (1000 * 60));
             const seconds = Math.floor((diff % (1000 * 60)) / 1000);
             timeSpan.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
-            timer.style.display = 'block';
+            timer.classList.add('active');
         } else {
-            timer.style.display = 'none';
+            timer.classList.remove('active');
         }
     } else {
-        timer.style.display = 'none';
+        timer.classList.remove('active');
     }
 }
 
@@ -1105,9 +1108,11 @@ function activateCurse(slotNumber) {
     .then(data => {
         if (data.success) {
             playSoundIfEnabled('/card-curse.m4r');
+            console.log(data);
             
             // Handle dice roll requirement
             if (data.requires_dice_roll) {
+                console.log('dice roll required, showing dice popover');
                 setTimeout(() => {
                     openDicePopover((die1, die2, total) => {
                         fetch('game.php', {
@@ -1974,7 +1979,7 @@ function showCurseBlockOverlay(curseName, cardType) {
     const requirement = document.getElementById('curseBlockRequirement');
     
     if (overlay && message && requirement) {
-        message.textContent = curseName;
+        message.innerHTML = '<i class="fa-solid fa-skull-crossbones"></i> ' + curseName;
         requirement.textContent = `Complete a ${cardType} card to clear this curse`;
         overlay.style.display = 'flex';
         
@@ -2146,7 +2151,12 @@ function showEffectsSlideout(effectType, title, content, isOpponent) {
                     <div class="slideout-effect">
                         <div class="slideout-effect-name">${effect.card_name}</div>
                         <div>${effect.card_description}</div>
-                        ${effect.expires_at ? `<div style="margin-top: 4px; opacity: 0.8;">Expires: ${new Date(effect.expires_at).toLocaleTimeString()}</div>` : ''}
+                        ${effect.expires_at ? `<div style="margin-top: 4px; opacity: 0.8;">Expires: ${new Date(effect.expires_at + 'Z').toLocaleString('en-US', {
+  timeZone: 'America/Indianapolis',
+  hour: 'numeric',
+  minute: 'numeric',
+  second: 'numeric'
+})}</div>` : ''}
                     </div>
                 `).join('');
             }
@@ -2264,7 +2274,10 @@ function setupScoreBugHandlers() {
 
 function setScorebugWidth() {
     const $scoreBug = $('.score-bug');
-    $scoreBug.width($scoreBug.width());
+    $scoreBug.width('');
+    setTimeout(() => {
+        $scoreBug.width($scoreBug.width());
+    }, 100);
 }
 
 function toggleScoreBugExpanded() {

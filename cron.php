@@ -267,7 +267,6 @@ function checkExpiredTimers($specificTimerId = null) {
         if ($timer['timer_type'] === 'siphon') {
             // Subtract score
             require_once 'travel_card_actions.php';
-            updateScore($timer['game_id'], $timer['player_id'], -$timer['score_subtract'], $timer['player_id']);
             
             // Check if completion condition is met
             $shouldContinue = true;
@@ -292,6 +291,8 @@ function checkExpiredTimers($specificTimerId = null) {
             }
             
             if ($shouldContinue) {
+                // Subtract score again
+                updateScore($timer['game_id'], $timer['player_id'], -$timer['score_subtract'], $timer['player_id']);
                 // Create new timer for next cycle
                 createSiphonTimer($timer['game_id'], $timer['player_id'], $timer['description'], $timer['duration_minutes'], $timer['score_subtract'], $timer['completion_type']);
             }

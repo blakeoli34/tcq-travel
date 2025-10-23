@@ -735,14 +735,7 @@ function clearExpiredDailyDecks($gameId) {
         $stmt->execute([$gameId]);
         $playerIds = $stmt->fetchAll(PDO::FETCH_COLUMN);
         
-        foreach ($playerIds as $playerId) {
-            // Clear active curse effects from previous day
-            $stmt = $pdo->prepare("
-                DELETE FROM active_curse_effects 
-                WHERE game_id = ? AND player_id = ?
-            ");
-            $stmt->execute([$gameId, $playerId]);
-            
+        foreach ($playerIds as $playerId) {            
             // Clear slots from previous days
             $stmt = $pdo->prepare("
                 UPDATE daily_deck_slots 
