@@ -276,7 +276,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             }
             
             $slotNumber = intval($_POST['slot_number']);
-            $result = activateCurse($player['game_id'], $player['id'], $slotNumber);
+            $diceResult = $_POST['dice_result'] ?? null;
+            $result = activateCurse($player['game_id'], $player['id'], $slotNumber, $diceResult);
             echo json_encode($result);
             exit;
 
@@ -714,74 +715,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 'wait_until' => $waitUntil,
                 'has_wait' => $waitUntil && strtotime($waitUntil) > time()
             ]);
-            exit;
-
-        case 'check_curse_dice':
-            $effectId = intval($_POST['effect_id']);
-            $die1 = intval($_POST['die1']);
-            $die2 = intval($_POST['die2']);
-            $total = intval($_POST['total']);
-            
-            try {
-                $pdo = Config::getDatabaseConnection();
-                
-                // Get curse effect details
-                $stmt = $pdo->prepare("
-                    SELECT ace.*, c.dice_condition, c.dice_threshold, c.slot_number
-                    FROM active_curse_effects ace
-                    JOIN cards c ON ace.card_id = c.id
-                    WHERE ace.id = ?
-                ");
-                $stmt->execute([$effectId]);
-                $curse = $stmt->fetch();
-                
-                if (!$curse) {
-                    echo json_encode(['success' => false, 'message' => 'Curse not found']);
-                    exit;
-                }
-                
-                $cleared = false;
-                
-                switch ($curse['dice_condition']) {
-                    case 'even':
-                        $cleared = ($total % 2 === 0);
-                        break;
-                    case 'odd':
-                        $cleared = ($total % 2 !== 0);
-                        break;
-                    case 'doubles':
-                        $cleared = ($die1 === $die2);
-                        break;
-                    case 'above':
-                        $cleared = ($total > $curse['dice_threshold']);
-                        break;
-                    case 'below':
-                        $cleared = ($total < $curse['dice_threshold']);
-                        break;
-                }
-                
-                if ($cleared) {
-                    // Clear curse
-                    $stmt = $pdo->prepare("DELETE FROM active_curse_effects WHERE id = ?");
-                    $stmt->execute([$effectId]);
-                    
-                    echo json_encode([
-                        'success' => true,
-                        'cleared' => true,
-                        'message' => 'Curse cleared!'
-                    ]);
-                } else {
-                    echo json_encode([
-                        'success' => true,
-                        'cleared' => false,
-                        'message' => 'Curse remains active'
-                    ]);
-                }
-                
-            } catch (Exception $e) {
-                error_log("Error checking curse dice: " . $e->getMessage());
-                echo json_encode(['success' => false, 'message' => $e->getMessage()]);
-            }
             exit;
 
         case 'check_blocking_curses':
@@ -1350,6 +1283,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         case 'hotel':
             echo '<link rel="stylesheet" href="hotel.css">';
             break;
+        case 'mountains':
+            echo '<link rel="stylesheet" href="mountains.css">';
+            break;
     } ?>
 </head>
 <body class="<?php 
@@ -1443,6 +1379,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 <div class="entrance" id="entrance"></div>
             </div>
         </div>
+    </div>
+    <div class="background-container mountains">
+        <!-- Sun/Moon -->
+        <div class="sun"></div>
+        <div class="moon"></div>
+
+        <!-- Valley/Ground -->
+        <div class="valley"></div>
+
+        <!-- Mountain Layers -->
+        <div class="mountain-layer mountain-back"></div>
+        <div class="mountain-layer mountain-front"></div>
+
+        <!-- Clouds -->
+        <div class="cloud cloud-1"></div>
+        <div class="cloud cloud-2"></div>
+        <div class="cloud cloud-3"></div>
     </div>
     <div class="container">
         <?php if ($gameStatus === 'waiting' && count($players) < 2): ?>

@@ -351,8 +351,23 @@ function createSiphonTimer($gameId, $playerId, $cardName, $repeatMinutes, $score
             $scoreSubtract,
             $completionType
         ]);
+
+        $timerId = $pdo->lastInsertId();
+
+        // Add dynamic at job for timer expiration
+        $endTimeLocal = clone $endTime;
+        $endTimeLocal->setTimezone(new DateTimeZone('America/Indiana/Indianapolis'));
+
+        $atTime = $endTimeLocal->format('H:i M j, Y');
+        $seconds = $endTimeLocal->format('s');
+
+        $atCommand = "sleep {$seconds} && /usr/bin/php /var/www/travel/cron.php timer_{$timerId}";
+
+        $atJob = shell_exec("echo '{$atCommand}' | at {$atTime} 2>&1");
+
+        error_log("Created at job for timer {$timerId}: {$atTime} +{$seconds}s - Result: {$atJob}");
         
-        return ['success' => true, 'timer_id' => $pdo->lastInsertId()];
+        return ['success' => true, 'timer_id' => $timerId];
         
     } catch (Exception $e) {
         error_log("Error creating siphon timer: " . $e->getMessage());

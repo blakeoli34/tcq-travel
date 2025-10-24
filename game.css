@@ -99,7 +99,8 @@ body.cruise {
 }
 
 body.cruise .background-container.cruise,
-body.hotel .background-container.hotel {
+body.hotel .background-container.hotel,
+body.mountains .background-container.mountains {
     position: absolute;
     top: 0;
     left: 0;
@@ -107,6 +108,11 @@ body.hotel .background-container.hotel {
     height: 100vh;
     overflow: hidden;
     display: block;
+}
+
+body.mountains {
+    transition: all 0.4s ease;
+    background: linear-gradient(180deg, #87CEEB 0%, #B8E6FF 50%, #E0F6FF 100%);
 }
 
 .container {
@@ -142,7 +148,7 @@ body.hotel .background-container.hotel {
     margin-bottom: 4px;
 }
 
-.game-timer-hand.visible {
+body:not(.backgrounded) .game-timer-hand.visible {
     transform: translate(-50%, 0);
     opacity: 1;
 }
@@ -466,7 +472,7 @@ body.hotel .background-container.hotel {
     overflow-y: scroll;
 }
 
-.daily-deck-container.loaded {
+body:not(.backgrounded) .daily-deck-container.loaded {
     transform: scale(1);
     opacity: 1;
 }
@@ -882,7 +888,7 @@ body.hotel .background-container.hotel {
     z-index: 2000;
 }
 
-.score-bug.visible {
+body:not(.backgrounded) .score-bug.visible {
     transform: translate(-50%, 0);
     opacity: 1;
 }
@@ -1759,7 +1765,7 @@ body.hotel .background-container.hotel {
 .curse-timer {
     position: fixed;
     bottom: 180px;
-    background: rgba(103, 89, 122, 0.9);
+    background: rgba(103, 89, 122, 0.7);
     color: white;
     padding: 8px 0px;
     border-radius: 15px 15px 0 0;
@@ -1775,7 +1781,7 @@ body.hotel .background-container.hotel {
     opacity: 0;
 }
 
-.curse-timer.active {
+body:not(.backgrounded) .curse-timer.active {
     opacity: 1;
 }
 
@@ -1784,7 +1790,7 @@ body.hotel .background-container.hotel {
     transform: rotate(90deg);
 }
 
-.curse-timer.left.active {
+body:not(.backgrounded) .curse-timer.left.active {
     left: -34px;
 }
 
@@ -1793,7 +1799,7 @@ body.hotel .background-container.hotel {
     transform: rotate(-90deg);
 }
 
-.curse-timer.right.active {
+body:not(.backgrounded) .curse-timer.right.active {
     right: -34px;
 }
 

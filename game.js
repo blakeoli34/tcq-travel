@@ -94,9 +94,16 @@ $(document).ready(function() {
     document.addEventListener('visibilitychange', function() {
         if (!document.hidden) {
             updateAppBadge(0);
+            $('.daily-slot').removeClass('loading');
+            setTimeout(() => {
+                $('body').removeClass('backgrounded');
+            }, 1000);
         }
         if (document.hidden) {
             setScorebugWidth();
+            setTimeout(() => {
+                $('body').addClass('backgrounded');
+            }, 500);
         }
     });
 
@@ -866,6 +873,7 @@ function storeChallenge(slotNumber) {
             showInAppNotification('Challenge Stored!', data.message);
             loadDailyDeck();
             loadHandCards();
+            $('.daily-slot[data-slot="' + slotNumber + '"]').removeClass('expanded');
         } else {
             alert('Failed to store challenge: ' + data.message);
         }
@@ -1099,6 +1107,53 @@ function vetoStoredChallenge(playerCardId) {
 }
 
 function activateCurse(slotNumber) {
+
+    // Get card data to check if dice roll needed
+    const slot = dailyDeckData.slots[slotNumber - 1];
+    const card = slot.card_data;
+    
+    // Handle dice roll requirement BEFORE backend call
+    if (card && card.roll_dice) {
+        console.log('dice roll required');
+        setTimeout(() => {
+            console.log('attempting dice roll');
+            openDicePopover((die1, die2, total) => {
+                // Check dice condition on frontend
+                const cleared = checkDiceCondition(card.dice_condition, card.dice_threshold, die1, die2, total);
+                
+                // Call backend with result
+                fetch('game.php', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: `action=activate_curse&slot_number=${slotNumber}&dice_result=${cleared ? 'cleared' : 'activated'}`
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        playSoundIfEnabled('/card-curse.m4r');
+                        showInAppNotification(cleared ? 'Curse Cleared!' : 'Curse Activated!', data.message);
+                        // Animate card content out before removing
+                        const slot = document.querySelector(`.daily-slot[data-slot="${slotNumber}"]`);
+                        const cardContent = slot?.querySelector('.card-content');
+                        if (cardContent) {
+                            cardContent.style.transition = 'opacity 0.7s ease, transform 0.7s ease';
+                            cardContent.style.opacity = '0';
+                            cardContent.style.transform = 'scale(3)';
+                            
+                            setTimeout(() => {
+                                loadDailyDeck();
+                            }, 700);
+                        } else {
+                            loadDailyDeck();
+                        }
+                        setTimeout(() => updateStatusEffects(), 1000);
+                    }
+                });
+            });
+        }, 500);
+        return;
+    }
+
     fetch('game.php', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -1110,27 +1165,6 @@ function activateCurse(slotNumber) {
             playSoundIfEnabled('/card-curse.m4r');
             console.log(data);
             
-            // Handle dice roll requirement
-            if (data.requires_dice_roll) {
-                console.log('dice roll required, showing dice popover');
-                setTimeout(() => {
-                    openDicePopover((die1, die2, total) => {
-                        fetch('game.php', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                            body: `action=check_curse_dice&effect_id=${data.effect_id}&die1=${die1}&die2=${die2}&total=${total}`
-                        })
-                        .then(response => response.json())
-                        .then(result => {
-                            if (result.success) {
-                                showInAppNotification(result.cleared ? 'Curse Cleared!' : 'Curse Active', result.message);
-                                updateStatusEffects();
-                            }
-                        });
-                    });
-                }, 1500);
-            }
-            
             // Animate card content out before removing
             const slot = document.querySelector(`.daily-slot[data-slot="${slotNumber}"]`);
             const cardContent = slot?.querySelector('.card-content');
@@ -1138,7 +1172,6 @@ function activateCurse(slotNumber) {
                 cardContent.style.transition = 'opacity 0.7s ease, transform 0.7s ease';
                 cardContent.style.opacity = '0';
                 cardContent.style.transform = 'scale(3)';
-                slot.classList.add('curse-activated');
                 
                 setTimeout(() => {
                     loadDailyDeck();
@@ -1151,6 +1184,25 @@ function activateCurse(slotNumber) {
             alert('Failed to activate curse: ' + data.message);
         }
     });
+}
+
+function checkDiceCondition(condition, threshold, die1, die2, total) {
+    if (!condition) return false;
+    
+    switch (condition) {
+        case 'above':
+            return total > threshold;
+        case 'below':
+            return total < threshold;
+        case 'even':
+            return die1 % 2 === 0 && die2 % 2 === 0;
+        case 'odd':
+            return die1 % 2 !== 0 && die2 % 2 !== 0;
+        case 'doubles':
+            return die1 === die2;
+        default:
+            return false;
+    }
 }
 
 function claimPower(slotNumber) {

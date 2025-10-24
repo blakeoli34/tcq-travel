@@ -344,7 +344,7 @@ function completeBattle($gameId, $playerId, $slotNumber, $isWinner) {
     }
 }
 
-function activateCurse($gameId, $playerId, $slotNumber) {
+function activateCurse($gameId, $playerId, $slotNumber, $diceResult = null) {
     try {
         $pdo = Config::getDatabaseConnection();
         $timezone = new DateTimeZone('America/Indiana/Indianapolis');
@@ -367,7 +367,7 @@ function activateCurse($gameId, $playerId, $slotNumber) {
         }
         
         // Process curse effects
-        $curseResult = processCurseCard($gameId, $playerId, $card);
+        $curseResult = processCurseCard($gameId, $playerId, $card, $diceResult);
         $effects = $curseResult['effects'];
 
         // Create active curse effect only if not instant
@@ -446,8 +446,8 @@ function claimPower($gameId, $playerId, $slotNumber) {
         
         // Check if player has room in hand (max 6 power/snap/spicy cards)
         $handCount = getPlayerHandCount($gameId, $playerId);
-        if ($handCount >= 6) {
-            throw new Exception("Hand is full (6 cards maximum)");
+        if ($handCount >= 10) {
+            throw new Exception("Hand is full (10 cards maximum)");
         }
         
         // Check if player already has this card in hand
@@ -561,12 +561,21 @@ function activatePowerFromSlot($gameId, $playerId, $slotNumber) {
             shuffleDailyDeck($gameId, $playerId);
             $effects[] = "Daily deck shuffled";
         }
+
+        if ($card['deck_peek']) {
+            $effects[] = "You can see the next 3 cards in the daily deck";
+        }
+        
+        if ($card['card_swap']) {
+            applyVetoWait($gameId, $playerId, 0);
+            $effects[] = "Wait penalty cleared!";
+        }
         
         // Create ongoing effects if needed
         if ($card['power_challenge_modify'] || $card['power_snap_modify'] || 
             $card['power_spicy_modify'] || $card['power_score_modify'] !== 'none' ||
             $card['power_veto_modify'] !== 'none' || $card['skip_challenge'] ||
-            $card['deck_peek'] || $card['card_swap'] || $card['bypass_expiration']) {
+            $card['deck_peek'] || $card['bypass_expiration']) {
             
             $effectId = addActivePowerEffect($gameId, $playerId, $card['card_id'], $card);
             error_log("Created active power effect ID: $effectId for card {$card['card_id']}");
@@ -931,9 +940,18 @@ function clearChallengeModifiers($gameId, $playerId) {
     }
 }
 
-function processCurseCard($gameId, $playerId, $card) {
+function processCurseCard($gameId, $playerId, $card, $diceResult = null) {
     $effects = [];
     $isInstant = true; // Track if this curse should be removed immediately
+
+    if ($card['roll_dice']) {
+        if ($diceResult === 'cleared') {
+            $effects[] = "Dice roll cleared the curse!";
+            return ['effects' => $effects, 'is_instant' => true, 'timer_id' => null];
+        } else if ($diceResult === 'activated') {
+            $effects[] = "Dice roll failed - curse activated!";
+        }
+    }
     
     // Instant effects
     if ($card['score_add']) {
@@ -984,7 +1002,7 @@ function processCurseCard($gameId, $playerId, $card) {
     }
 
     // Recurring siphon effects (clock/spicy siphon)
-    if ($card['score_subtract'] && $card['repeat_count'] && $card['timer_completion_type']) {
+    if ($card['score_subtract'] && $card['repeat_count'] && $card['timer_completion_type'] !== 'timer_expires') {
         // Siphon effect - subtract immediately then start recurring timer
         updateScore($gameId, $playerId, -$card['score_subtract'], $playerId);
         $effects[] = "Lost {$card['score_subtract']} points and will continue losing {$card['score_subtract']} points every {$card['repeat_count']} minutes until cleared";
@@ -993,34 +1011,6 @@ function processCurseCard($gameId, $playerId, $card) {
         $siphonResult = createSiphonTimer($gameId, $playerId, $card['card_name'], $card['repeat_count'], $card['score_subtract'], $card['timer_completion_type']);
         if ($siphonResult['success']) {
             $timerId = $siphonResult['timer_id'];
-        }
-    }
-    
-    // Dice effects
-    if ($card['roll_dice']) {
-        error_log('dice roll required');
-        $effects[] = "Roll dice to determine if curse is cleared";
-        
-        // Add to active effects first, then return special flag to trigger dice roll
-        $effectId = addActiveCurseEffect($gameId, $playerId, $card['id'], $card, $slotNumber, $timerId);
-        
-        if ($effectId && $card['dice_condition']) {
-            // Mark as pending dice roll
-            $stmt = $pdo->prepare("
-                UPDATE active_curse_effects 
-                SET pending_dice_roll = TRUE 
-                WHERE id = ?
-            ");
-            $stmt->execute([$effectId]);
-            
-            // Return special flag to trigger dice roll
-            return [
-                'effects' => $effects, 
-                'is_instant' => false, 
-                'timer_id' => $timerId,
-                'requires_dice_roll' => true,
-                'effect_id' => $effectId
-            ];
         }
     }
     
@@ -1045,6 +1035,13 @@ function addActiveCurseEffect($gameId, $playerId, $cardId, $card, $slotNumber = 
             $timezone = new DateTimeZone('UTC');
             $expiresAt = (new DateTime('now', $timezone))
                 ->add(new DateInterval('PT' . $card['timer'] . 'M'))
+                ->format('Y-m-d H:i:s');
+        }
+
+        if($card['repeat_count']) {
+            $timezone = new DateTimeZone('UTC');
+            $expiresAt = (new DateTime('now', $timezone))
+                ->add(new DateInterval('PT' . $card['repeat_count'] . 'M'))
                 ->format('Y-m-d H:i:s');
         }
         

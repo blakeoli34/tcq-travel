@@ -643,6 +643,17 @@ function isPlayerWaitingVeto($gameId, $playerId) {
 function applyVetoWait($gameId, $playerId, $minutes) {
     try {
         $pdo = Config::getDatabaseConnection();
+
+        if($minutes === 0) {
+            $stmt = $pdo->prepare("
+                UPDATE players 
+                SET veto_wait_until = ?
+                WHERE game_id = ? AND id = ?
+            ");
+            $stmt->execute([NULL, $gameId, $playerId]);
+
+            return true;
+        }
         
         // Check testing mode
         $stmt = $pdo->prepare("SELECT testing_mode FROM games WHERE id = ?");
@@ -650,7 +661,7 @@ function applyVetoWait($gameId, $playerId, $minutes) {
         $testingMode = (bool)$stmt->fetchColumn();
         
         // Override to 5 minutes in testing mode
-        if ($testingMode) {
+        if ($testingMode && $minutes > 5) {
             $minutes = 5;
         }
         

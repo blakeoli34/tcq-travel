@@ -75,14 +75,15 @@ function playPowerCard($gameId, $playerId, $playerCardId) {
         }
         
         if ($card['card_swap']) {
-            $effects[] = "You can swap a card in the daily deck slots";
+            applyVetoWait($gameId, $playerId, 0);
+            $effects[] = "Wait penalty cleared!";
         }
         
         // Create ongoing effects if needed
         if ($card['power_challenge_modify'] || $card['power_snap_modify'] || 
             $card['power_spicy_modify'] || $card['power_score_modify'] !== 'none' ||
             $card['power_veto_modify'] !== 'none' || $card['skip_challenge'] ||
-            $card['deck_peek'] || $card['card_swap'] || $card['bypass_expiration']) {
+            $card['deck_peek'] || $card['bypass_expiration']) {
             
             addActivePowerEffect($gameId, $playerId, $card['card_id'], $card);
             $effects[] = "Ongoing power effect activated";
