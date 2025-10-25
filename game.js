@@ -1110,16 +1110,12 @@ function activateCurse(slotNumber) {
 
     // Get card data to check if dice roll needed
     const slot = dailyDeckData.slots[slotNumber - 1];
-    const card = slot.card_data;
-    
     // Handle dice roll requirement BEFORE backend call
-    if (card && card.roll_dice) {
-        console.log('dice roll required');
+    if (slot && slot.roll_dice) {
         setTimeout(() => {
-            console.log('attempting dice roll');
             openDicePopover((die1, die2, total) => {
                 // Check dice condition on frontend
-                const cleared = checkDiceCondition(card.dice_condition, card.dice_threshold, die1, die2, total);
+                const cleared = checkDiceCondition(slot.dice_condition, slot.dice_threshold, die1, die2, total);
                 
                 // Call backend with result
                 fetch('game.php', {
@@ -3418,6 +3414,12 @@ let isDiceRolling = false;
 let curseDiceCallback = null;
 
 function openDicePopover(callback = null) {
+    // Collapse score bug if expanded
+    const scoreBug = document.getElementById('scoreBug');
+    if (scoreBug && scoreBug.classList.contains('expanded')) {
+        toggleScoreBugExpanded();
+    }
+
     const popover = document.getElementById('dicePopover');
     if (popover) {
         if (popover.classList.contains('active')) {

@@ -1286,6 +1286,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         case 'mountains':
             echo '<link rel="stylesheet" href="mountains.css">';
             break;
+        case 'private':
+            echo '<link rel="stylesheet" href="private.css">';
+            break;
     } ?>
 </head>
 <body class="<?php 
@@ -1350,26 +1353,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         </div>
     </div>
     <div class="background-container hotel">
-        <!-- Sky -->
         <div class="sky" id="sky">
-            <!-- Sun -->
             <div class="sun" id="sun"></div>
-            
-            <!-- Moon -->
             <div class="moon" id="moon"></div>
-            
-            <!-- Clouds -->
             <div class="clouds">
                 <div class="cloud cloud1" id="cloud1"></div>
                 <div class="cloud cloud2" id="cloud2"></div>
                 <div class="cloud cloud3" id="cloud3"></div>
             </div>
         </div>
-        
-        <!-- Ground -->
         <div class="ground" id="ground"></div>
-
-        <!-- Hotel Building -->
         <div class="hotel-container">
             <div class="building" id="building">
                 <div class="elevator-shaft" id="elevatorShaft">
@@ -1381,21 +1374,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         </div>
     </div>
     <div class="background-container mountains">
-        <!-- Sun/Moon -->
         <div class="sun"></div>
         <div class="moon"></div>
-
-        <!-- Valley/Ground -->
         <div class="valley"></div>
-
-        <!-- Mountain Layers -->
         <div class="mountain-layer mountain-back"></div>
         <div class="mountain-layer mountain-front"></div>
-
-        <!-- Clouds -->
         <div class="cloud cloud-1"></div>
         <div class="cloud cloud-2"></div>
         <div class="cloud cloud-3"></div>
+    </div>
+    <div class="background-container private">
+        <div class="yard"></div>
+        <div class="sun"></div>
+        <div class="moon"></div>
+        <div class="cloud cloud-1"></div>
+        <div class="cloud cloud-2"></div>
+        <div class="cloud cloud-3"></div>
+        <div class="cloud cloud-4"></div>
+        <div class="cloud cloud-5"></div>
+        <div class="cloud cloud-6"></div>
     </div>
     <div class="container">
         <?php if ($gameStatus === 'waiting' && count($players) < 2): ?>

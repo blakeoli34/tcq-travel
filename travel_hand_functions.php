@@ -972,14 +972,16 @@ function clearCursesByCompletion($gameId, $playerId, $completionType) {
             $stmt = $pdo->prepare("
                 SELECT id FROM timers WHERE game_id = ? AND player_id = ? AND timer_type = 'siphon' AND completion_type = 'first_trigger_any'
             ");
-            $timerIdToDelete = $stmt->execute([$gameId, $playerId]);
+            $stmt->execute([$gameId, $playerId]);
+            $timerIdToDelete = $stmt->fetchColumn();
         }
 
         if($completionType === 'spicy') {
             $stmt = $pdo->prepare("
                 SELECT id FROM timers WHERE game_id = ? AND player_id = ? AND timer_type = 'siphon'
             ");
-            $timerIdToDelete = $stmt->execute([$gameId, $playerId]);
+            $stmt->execute([$gameId, $playerId]);
+            $timerIdToDelete = $stmt->fetchColumn();
         }
 
         if($timerIdToDelete !== NULL) {

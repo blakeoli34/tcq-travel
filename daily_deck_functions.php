@@ -423,7 +423,10 @@ function getDailyDeckStatus($gameId, $playerId) {
         // Get slot status
         $stmt = $pdo->prepare("
             SELECT dds.*, c.card_name, c.card_category, c.card_description, c.card_points,
-                c.veto_subtract, c.veto_steal, c.veto_wait, c.veto_snap, c.veto_spicy, c.timer
+                c.veto_subtract, c.veto_steal, c.veto_wait, c.veto_snap, c.veto_spicy, c.timer,
+                c.roll_dice, c.dice_condition, c.dice_threshold, c.challenge_modify, c.score_modify,
+                c.veto_modify, c.snap_modify, c.spicy_modify, c.wait, c.timer_completion_type,
+                c.complete_snap, c.complete_spicy, c.repeat_count, c.score_add, c.score_subtract, c.score_steal
             FROM daily_deck_slots dds
             LEFT JOIN cards c ON dds.card_id = c.id
             WHERE dds.game_id = ? AND dds.player_id = ? AND dds.deck_date = ?
@@ -560,6 +563,23 @@ function drawCardToSlot($gameId, $playerId, $slotNumber) {
                 AND ddc.card_id = ? AND ddc.is_used = 0
             ");
             $stmt->execute([$gameId, $opponentId, $today, $card['card_id']]);
+
+            // Send push notification to opponent
+            $stmt = $pdo->prepare("SELECT first_name FROM players WHERE id = ?");
+            $stmt->execute([$playerId]);
+            $playerName = $stmt->fetchColumn();
+            
+            $stmt = $pdo->prepare("SELECT fcm_token FROM players WHERE id = ?");
+            $stmt->execute([$opponentId]);
+            $opponentToken = $stmt->fetchColumn();
+            
+            if ($opponentToken && $playerName) {
+                sendPushNotification(
+                    $opponentToken,
+                    'Battle Card Drawn!',
+                    $playerName . ' drew today\'s Battle card! Prepare for battle and go tell them you are ready.'
+                );
+            }
         }
         
         // Mark card as used for THIS PLAYER

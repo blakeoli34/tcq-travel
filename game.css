@@ -100,7 +100,8 @@ body.cruise {
 
 body.cruise .background-container.cruise,
 body.hotel .background-container.hotel,
-body.mountains .background-container.mountains {
+body.mountains .background-container.mountains,
+body.private .background-container.private {
     position: absolute;
     top: 0;
     left: 0;
@@ -1914,7 +1915,7 @@ body:not(.backgrounded) .curse-timer.right.active {
 /* Dice Styles */
 .dice-popover {
     position: fixed;
-    top: 100px;
+    top: 50%;
     width: 90vw;
     max-width: 400px;
     left: 50%;
@@ -1930,15 +1931,15 @@ body:not(.backgrounded) .curse-timer.right.active {
     gap: 20px;
     opacity: 0;
     pointer-events: none;
-    transform: translateX(-50%) translateY(-60px) scale(0.5);
-    transition: all 0.3s var(--animation-spring);
+    transform: translateX(-50%) translateY(-50%) scale(0);
+    transition: all 0.4s ease;
     z-index: 2001;
 }
 
 .dice-popover.active {
     opacity: 1;
     pointer-events: all;
-    transform: translateX(-50%) translateY(0) scale(1);
+    transform: translateX(-50%) translateY(-50%) scale(1);
 }
 
 #dicePopoverContainer { width: 100%; }
