@@ -326,3 +326,9 @@
     0% { transform: translateX(-100px); }
     100% { transform: translateX(calc(100vw + 100px)); }
 }
+
+body.cruise .veto-wait-overlay,
+body.cruise .curse-block-overlay,
+body.cruise .deck-empty-overlay {
+    height: 75%;
+}

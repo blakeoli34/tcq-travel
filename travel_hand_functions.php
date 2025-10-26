@@ -897,21 +897,31 @@ function clearSnapModifiers($gameId, $playerId) {
     try {
         $pdo = Config::getDatabaseConnection();
         
-        // Clear curse effects that modify snap cards
+        // Get earliest snap modifier effect
         $stmt = $pdo->prepare("
-            DELETE ace FROM active_curse_effects ace
-            JOIN cards c ON ace.card_id = c.id
-            WHERE ace.game_id = ? AND ace.player_id = ? AND c.snap_modify = 1
+            (SELECT 'curse' as effect_type, ace.id, ace.created_at
+             FROM active_curse_effects ace
+             JOIN cards c ON ace.card_id = c.id
+             WHERE ace.game_id = ? AND ace.player_id = ? AND c.snap_modify = 1)
+            UNION ALL
+            (SELECT 'power' as effect_type, ape.id, ape.created_at
+             FROM active_power_effects ape
+             JOIN cards c ON ape.power_card_id = c.id
+             WHERE ape.game_id = ? AND ape.player_id = ? AND c.power_snap_modify = 1)
+            ORDER BY created_at ASC
+            LIMIT 1
         ");
-        $stmt->execute([$gameId, $playerId]);
+        $stmt->execute([$gameId, $playerId, $gameId, $playerId]);
+        $earliestEffect = $stmt->fetch();
         
-        // Clear power effects that modify snap cards
-        $stmt = $pdo->prepare("
-            DELETE ape FROM active_power_effects ape
-            JOIN cards c ON ape.power_card_id = c.id
-            WHERE ape.game_id = ? AND ape.player_id = ? AND c.power_snap_modify = 1
-        ");
-        $stmt->execute([$gameId, $playerId]);
+        if ($earliestEffect) {
+            if ($earliestEffect['effect_type'] === 'curse') {
+                $stmt = $pdo->prepare("DELETE FROM active_curse_effects WHERE id = ?");
+            } else {
+                $stmt = $pdo->prepare("DELETE FROM active_power_effects WHERE id = ?");
+            }
+            $stmt->execute([$earliestEffect['id']]);
+        }
         
         return true;
         
@@ -925,21 +935,31 @@ function clearSpicyModifiers($gameId, $playerId) {
     try {
         $pdo = Config::getDatabaseConnection();
         
-        // Clear curse effects that modify spicy cards
+        // Get earliest spicy modifier effect
         $stmt = $pdo->prepare("
-            DELETE ace FROM active_curse_effects ace
-            JOIN cards c ON ace.card_id = c.id
-            WHERE ace.game_id = ? AND ace.player_id = ? AND c.spicy_modify = 1
+            (SELECT 'curse' as effect_type, ace.id, ace.created_at
+             FROM active_curse_effects ace
+             JOIN cards c ON ace.card_id = c.id
+             WHERE ace.game_id = ? AND ace.player_id = ? AND c.spicy_modify = 1)
+            UNION ALL
+            (SELECT 'power' as effect_type, ape.id, ape.created_at
+             FROM active_power_effects ape
+             JOIN cards c ON ape.power_card_id = c.id
+             WHERE ape.game_id = ? AND ape.player_id = ? AND c.power_spicy_modify = 1)
+            ORDER BY created_at ASC
+            LIMIT 1
         ");
-        $stmt->execute([$gameId, $playerId]);
+        $stmt->execute([$gameId, $playerId, $gameId, $playerId]);
+        $earliestEffect = $stmt->fetch();
         
-        // Clear power effects that modify spicy cards
-        $stmt = $pdo->prepare("
-            DELETE ape FROM active_power_effects ape
-            JOIN cards c ON ape.power_card_id = c.id
-            WHERE ape.game_id = ? AND ape.player_id = ? AND c.power_spicy_modify = 1
-        ");
-        $stmt->execute([$gameId, $playerId]);
+        if ($earliestEffect) {
+            if ($earliestEffect['effect_type'] === 'curse') {
+                $stmt = $pdo->prepare("DELETE FROM active_curse_effects WHERE id = ?");
+            } else {
+                $stmt = $pdo->prepare("DELETE FROM active_power_effects WHERE id = ?");
+            }
+            $stmt->execute([$earliestEffect['id']]);
+        }
         
         return true;
         
@@ -957,13 +977,13 @@ function clearCursesByCompletion($gameId, $playerId, $completionType) {
         $modifyField = $completionType . '_modify';
         $timerIdToDelete = NULL;
         
-        // Get curses that require this card type to be completed OR modify this card type
+        // Get curses that require this card type to be completed (snap/spicy block)
         $stmt = $pdo->prepare("
             SELECT ace.id, ace.slot_number
             FROM active_curse_effects ace
             JOIN cards c ON ace.card_id = c.id
             WHERE ace.game_id = ? AND ace.player_id = ? 
-            AND (c.$completionField = 1 OR c.$modifyField = 1)
+            AND c.$completionField = 1
         ");
         $stmt->execute([$gameId, $playerId]);
         $effects = $stmt->fetchAll();
@@ -1011,6 +1031,9 @@ function clearPlayerCurseEffects($gameId, $playerId) {
         $stmt = $pdo->prepare("SELECT slot_number FROM active_curse_effects WHERE game_id = ? AND player_id = ?");
         $stmt->execute([$gameId, $playerId]);
         $slotNumbers = $stmt->fetchAll(PDO::FETCH_COLUMN);
+
+        $stmt = $pdo->prepare("DELETE FROM timers WHERE game_id = ? AND player_id = ?");
+        $stmt->execute([$gameId, $playerId]);
         
         $stmt = $pdo->prepare("DELETE FROM active_curse_effects WHERE game_id = ? AND player_id = ?");
         $stmt->execute([$gameId, $playerId]);

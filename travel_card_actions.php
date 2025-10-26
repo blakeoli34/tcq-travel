@@ -591,6 +591,23 @@ function activatePowerFromSlot($gameId, $playerId, $slotNumber) {
         
         // Clear slot
         completeClearSlot($gameId, $playerId, $slotNumber);
+
+        $opponentId = getOpponentPlayerId($gameId, $playerId);
+        $stmt = $pdo->prepare("SELECT fcm_token, first_name FROM players WHERE id = ?");
+        $stmt->execute([$opponentId]);
+        $opponent = $stmt->fetch();
+
+        if ($opponent['fcm_token']) {
+            $stmt = $pdo->prepare("SELECT first_name FROM players WHERE id = ?");
+            $stmt->execute([$playerId]);
+            $playerName = $stmt->fetchColumn();
+            
+            sendPushNotification(
+                $opponent['fcm_token'],
+                'Power Card Activated',
+                "{$playerName} used: {$card['card_name']}"
+            );
+        }
         
         $pdo->commit();
         return ['success' => true, 'message' => implode(', ', $effects)];
@@ -907,14 +924,40 @@ function clearChallengeModifiers($gameId, $playerId) {
     try {
         $pdo = Config::getDatabaseConnection();
         
-        // Remove challenge modify effects
+        // Get earliest challenge modifier effect
+        $opponentId = getOpponentPlayerId($gameId, $playerId);
+        
         $stmt = $pdo->prepare("
-            DELETE ace FROM active_curse_effects ace
-            JOIN cards c ON ace.card_id = c.id
-            WHERE ace.game_id = ? AND ace.player_id = ? AND c.challenge_modify = 1
+            (SELECT 'curse' as effect_type, ace.id, ace.created_at
+             FROM active_curse_effects ace
+             JOIN cards c ON ace.card_id = c.id
+             WHERE ace.game_id = ? AND ace.player_id = ? AND c.challenge_modify = 1)
+            UNION ALL
+            (SELECT 'power' as effect_type, ape.id, ape.created_at
+             FROM active_power_effects ape
+             JOIN cards c ON ape.power_card_id = c.id
+             WHERE ape.game_id = ? AND ape.player_id = ? AND c.power_challenge_modify = 1 AND c.target_opponent = 1)
+            UNION ALL
+            (SELECT 'power' as effect_type, ape.id, ape.created_at
+             FROM active_power_effects ape
+             JOIN cards c ON ape.power_card_id = c.id
+             WHERE ape.game_id = ? AND ape.player_id = ? AND c.power_challenge_modify = 1)
+            ORDER BY created_at ASC
+            LIMIT 1
         ");
-        $stmt->execute([$gameId, $playerId]);
+        $stmt->execute([$gameId, $playerId, $gameId, $opponentId, $gameId, $playerId]);
+        $earliestEffect = $stmt->fetch();
+        
+        if ($earliestEffect) {
+            if ($earliestEffect['effect_type'] === 'curse') {
+                $stmt = $pdo->prepare("DELETE FROM active_curse_effects WHERE id = ?");
+            } else {
+                $stmt = $pdo->prepare("DELETE FROM active_power_effects WHERE id = ?");
+            }
+            $stmt->execute([$earliestEffect['id']]);
+        }
 
+        // Handle siphon timer deletion (keep existing logic)
         $stmt = $pdo->prepare("
             SELECT id FROM timers WHERE game_id = ? AND player_id = ? AND timer_type = 'siphon' AND completion_type = 'first_trigger_any'
         ");
@@ -924,14 +967,6 @@ function clearChallengeModifiers($gameId, $playerId) {
         if($timerIdToDelete) {
             deleteTimer($timerIdToDelete, $gameId);
         }
-
-        $opponentId = getOpponentPlayerId($gameId, $playerId);
-        $stmt = $pdo->prepare("
-            DELETE ape FROM active_power_effects ape
-            JOIN cards c ON ape.power_card_id = c.id
-            WHERE ape.game_id = ? AND ape.player_id = ? AND c.power_challenge_modify = 1 AND c.target_opponent = 1
-        ");
-        $stmt->execute([$gameId, $opponentId]);
         
         return true;
         
@@ -986,7 +1021,7 @@ function processCurseCard($gameId, $playerId, $card, $diceResult = null) {
     
     // Check for ongoing effects
     if ($card['challenge_modify'] || $card['snap_modify'] || $card['spicy_modify'] || $card['veto_modify'] !== 'none' || 
-        $card['timer'] || $card['repeat_count'] || $card['roll_dice'] || 
+        $card['timer'] || $card['repeat_count'] || 
         $card['complete_snap'] || $card['complete_spicy']) {
         $isInstant = false;
         error_log('curse will be ongoing');
@@ -1161,6 +1196,15 @@ function getCurseTimers($gameId, $playerId, $opponentId) {
         ");
         $stmt->execute([$gameId, $playerId]);
         $playerTimer = $stmt->fetch();
+
+        // Get player curse timer count
+        $stmt = $pdo->prepare("
+            SELECT COUNT(*)
+            FROM active_curse_effects
+            WHERE game_id = ? AND player_id = ? AND timer_id IS NOT NULL
+        ");
+        $stmt->execute([$gameId, $playerId]);
+        $playerCount = $stmt->fetchColumn();
         
         // Get opponent curse timer with card name
         $stmt = $pdo->prepare("
@@ -1173,6 +1217,15 @@ function getCurseTimers($gameId, $playerId, $opponentId) {
         ");
         $stmt->execute([$gameId, $opponentId]);
         $opponentTimer = $stmt->fetch();
+
+        // Get opponent curse timer count
+        $stmt = $pdo->prepare("
+            SELECT COUNT(*)
+            FROM active_curse_effects
+            WHERE game_id = ? AND player_id = ? AND timer_id IS NOT NULL
+        ");
+        $stmt->execute([$gameId, $opponentId]);
+        $opponentCount = $stmt->fetchColumn();
         
         // Convert to UTC for JavaScript
         if ($playerTimer && $playerTimer['expires_at']) {
@@ -1187,7 +1240,9 @@ function getCurseTimers($gameId, $playerId, $opponentId) {
         
         return [
             'success' => true,
+            'player_count' => $playerCount ?: null,
             'player_timer' => $playerTimer ?: null,
+            'opponent_count' => $opponentCount ?: null,
             'opponent_timer' => $opponentTimer ?: null
         ];
         

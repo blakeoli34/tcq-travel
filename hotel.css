@@ -287,3 +287,12 @@
     0%, 100% { transform: translateX(0px); }
     50% { transform: translateX(20px); }
 }
+
+body.hotel .veto-wait-overlay,
+body.hotel .curse-block-overlay,
+body.hotel .deck-empty-overlay {
+    width: 50%;
+    text-align: center;
+    left: calc(50% - 20px);
+    text-wrap-style: pretty;
+}

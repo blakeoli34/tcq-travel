@@ -230,7 +230,7 @@ function checkExpiredTimers($specificTimerId = null) {
                     $stmt = $pdo->prepare("
                         SELECT COUNT(*) FROM completed_cards 
                         WHERE game_id = ? AND player_id = ? AND card_type IN ('challenge', 'snap', 'spicy')
-                        AND created_at > ?
+                        AND completed_at > ?
                     ");
                     $stmt->execute([$timer['game_id'], $timer['player_id'], $timer['start_time']]);
                     $shouldContinue = $stmt->fetchColumn() == 0;
@@ -240,18 +240,48 @@ function checkExpiredTimers($specificTimerId = null) {
                     $stmt = $pdo->prepare("
                         SELECT COUNT(*) FROM completed_cards 
                         WHERE game_id = ? AND player_id = ? AND card_type = 'spicy'
-                        AND created_at > ?
+                        AND completed_at > ?
                     ");
                     $stmt->execute([$timer['game_id'], $timer['player_id'], $timer['start_time']]);
                     $shouldContinue = $stmt->fetchColumn() == 0;
                 }
                 
                 if ($shouldContinue) {
-                    error_log('requirements not met to clear siphon effect, restarting timer');
+                    error_log('requirements not met to clear siphon effect, extending timer');
                     // Subtract score again
                     updateScore($timer['game_id'], $timer['player_id'], -$timer['score_subtract'], $timer['player_id']);
-                    // Create new timer for next cycle
-                    createSiphonTimer($timer['game_id'], $timer['player_id'], $timer['description'], $timer['duration_minutes'], $timer['score_subtract'], $timer['completion_type']);
+
+                    $pointText = ($timer['score_subtract'] == 1) ? 'point' : 'points';
+                    $completionText = ($timer['completion_type'] === 'first_trigger_any') ? 
+                        'any challenge, snap, or spicy card' : 
+                        'a spicy card';
+                    
+                    sendPushNotification(
+                        $timer['player_id'],
+                        'Siphon Continues! 💀',
+                        "You lost {$timer['score_subtract']} more {$pointText}! Complete {$completionText} to clear the curse."
+                    );
+                    
+                    // Calculate new end time
+                    $newEndTime = new DateTime('now', new DateTimeZone('UTC'));
+                    $newEndTime->add(new DateInterval('PT' . ($timer['duration_minutes'] * 60) . 'S'));
+                    
+                    // Update timer end_time
+                    $stmt = $pdo->prepare("UPDATE timers SET end_time = ? WHERE id = ?");
+                    $stmt->execute([$newEndTime->format('Y-m-d H:i:s'), $timer['id']]);
+                    
+                    // Update curse effect expires_at
+                    $stmt = $pdo->prepare("UPDATE active_curse_effects SET expires_at = ? WHERE timer_id = ?");
+                    $stmt->execute([$newEndTime->format('Y-m-d H:i:s'), $timer['id']]);
+                    
+                    // Create new at job
+                    $endTimeLocal = clone $newEndTime;
+                    $endTimeLocal->setTimezone(new DateTimeZone('America/Indiana/Indianapolis'));
+                    $atTime = $endTimeLocal->format('H:i M j, Y');
+                    $seconds = $endTimeLocal->format('s');
+                    $atCommand = "sleep {$seconds} && /usr/bin/php /var/www/travel/cron.php timer_{$timer['id']}";
+                    shell_exec("echo '{$atCommand}' | at {$atTime} 2>&1");
+                    
                     return;
                 } else {
                     error_log('requirements have been met, continuing to remove curse effect');

@@ -400,10 +400,11 @@ function clearExpiredEffects($gameId) {
     try {
         $pdo = Config::getDatabaseConnection();
         
-        // Clear expired curse effects
+        // Clear expired curse effects EXCEPT siphon effects (those are handled by cron)
         $stmt = $pdo->prepare("
             DELETE FROM active_curse_effects 
             WHERE game_id = ? AND expires_at IS NOT NULL AND expires_at <= NOW()
+            AND timer_id NOT IN (SELECT id FROM timers WHERE timer_type = 'siphon')
         ");
         $stmt->execute([$gameId]);
         $clearedCurses = $stmt->rowCount();

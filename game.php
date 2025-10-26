@@ -73,7 +73,7 @@ if ($gameData['status'] === 'waiting' && $gameData['start_date']) {
     $now = new DateTime('now', $timezone);
     $startDate = new DateTime($gameData['start_date'], $timezone);
     
-    if ($now >= $startDate) {
+    if ($now >= $startDate || $testingMode) {
         // Activate the game
         $stmt = $pdo->prepare("UPDATE games SET status = 'active' WHERE id = ?");
         $stmt->execute([$player['game_id']]);
@@ -1490,7 +1490,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             });
             </script>
 
-        <?php elseif ($gameStatus === 'waiting' && $gameData['start_date']): 
+        <?php elseif ($gameStatus === 'waiting' && $gameData['start_date'] && !$testingMode): 
             $timezone = new DateTimeZone('America/Indiana/Indianapolis');
             $now = new DateTime('now', $timezone);
             $startDate = new DateTime($gameData['start_date'], $timezone);
@@ -1820,11 +1820,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
             <!-- Curse Timers -->
             <div class="curse-timer left" id="opponentCurseTimer">
+                <span id="opponentCurseCount"></span>
                 <i class="fa-solid fa-skull-crossbones"></i>
                 <span id="opponentCurseTime">0:00</span>
             </div>
 
             <div class="curse-timer right" id="playerCurseTimer">
+                <span id="playerCurseCount"></span>
                 <i class="fa-solid fa-skull-crossbones"></i>
                 <span id="playerCurseTime">0:00</span>
             </div>
@@ -1991,7 +1993,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     </div>
 
     <?php if ($testingMode): ?>
-    <div class="debug-toggle" onclick="toggleDebugPanel()">DEBUG</div>
+    <div class="debug-toggle" id="debugToggle" onclick="toggleDebugPanel()">DEBUG</div>
     <div class="debug-panel" id="debugPanel">
         <div class="debug-section">
             <h3>Testing Mode Active</h3>

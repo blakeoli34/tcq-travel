@@ -298,8 +298,9 @@ function checkDowntime() {
     if (hours >= 0 && hours < 8) {
         const nextAvailable = new Date(indianaTime);
         nextAvailable.setHours(8, 0, 0, 0);
-        
-        showDowntimeOverlay(nextAvailable);
+        if(!isVetoWaiting) {
+            showDowntimeOverlay(nextAvailable);
+        }
         hideGameClock();
         return true;
     }
@@ -419,18 +420,25 @@ function updateCurseTimers() {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            updateCurseTimerDisplay('playerCurseTimer', 'playerCurseTime', data.player_timer);
-            updateCurseTimerDisplay('opponentCurseTimer', 'opponentCurseTime', data.opponent_timer);
+            updateCurseTimerDisplay('playerCurseTimer', 'playerCurseTime', 'playerCurseCount', data.player_count, data.player_timer);
+            updateCurseTimerDisplay('opponentCurseTimer', 'opponentCurseTime', 'opponentCurseCount', data.opponent_count, data.opponent_timer);
         }
     });
 }
 
-function updateCurseTimerDisplay(timerId, timeSpanId, timerData) {
+function updateCurseTimerDisplay(timerId, timeSpanId, countId, count, timerData) {
     const timer = document.getElementById(timerId);
     const timeSpan = document.getElementById(timeSpanId);
+    const countSpan = document.getElementById(countId);
     
     // Guard: elements don't exist during onboarding
     if (!timer || !timeSpan) return;
+
+    if(count > 1) {
+        countSpan.textContent = count;
+    } else {
+        countSpan.textContent = '';
+    }
     
     if (timerData && timerData.expires_at) {
         const now = new Date();
@@ -1893,6 +1901,7 @@ function checkVetoWait() {
 }
 
 function startVetoWaitDisplay(waitUntil) {
+    hideDowntimeOverlay();
     console.log('Starting veto wait display');
     isVetoWaiting = true;
     
@@ -2052,6 +2061,13 @@ function hideCurseBlockOverlay() {
 // ========================================
 // STATUS EFFECTS SYSTEM
 // ========================================
+
+$('#opponentCurseTimer').on('click', function() {
+    showStatusEffectSlideout('curse', true);
+});
+$('#playerCurseTimer').on('click', function() {
+    showStatusEffectSlideout('curse', false)
+});
 
 function updateStatusEffects() {
     // Only update status effects if game is active
@@ -2515,7 +2531,7 @@ function animateScoreChange(element, newScore) {
     flyout.className = 'score-flyout';
     flyout.textContent = (scoreDiff > 0 ? '+' : '') + scoreDiff;
     flyout.style.cssText = `
-        ${isCurrentPlayer ? 'right: 20px;' : 'left: 20px;'}
+        ${isCurrentPlayer ? 'right: 25%;' : 'left: 25%;'}
     `;
     scoreBug.appendChild(flyout);
     
@@ -3611,8 +3627,11 @@ function setupSexyDice() {
 
 function toggleDebugPanel() {
     const panel = document.getElementById('debugPanel');
+    const toggle = document.getElementById('debugToggle');
     if (panel) {
         panel.classList.toggle('open');
+        toggle.classList.toggle('open');
+
         if (panel.classList.contains('open')) {
             updateDebugPanel();
         }

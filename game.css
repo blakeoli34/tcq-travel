@@ -229,6 +229,7 @@ body:not(.backgrounded) .game-timer-hand.visible {
     overflow-x: visible;
     overflow-y: auto;
     max-height: calc(100% - 100px);
+    align-items: stretch;
 }
 
 .hand-slot {
@@ -256,7 +257,6 @@ body:not(.backgrounded) .game-timer-hand.visible {
 }
 
 .hand-slot-card {
-    aspect-ratio: 1.85;
     width: 100%;
     height: 100%;
     background: white;
@@ -684,7 +684,7 @@ body:not(.backgrounded) .daily-deck-container.loaded {
     height: 100%;
     min-height: 130px;
     padding: 20px;
-    background: white;
+    background: rgba(255,255,255,0.7);
     border-radius: 20px;
 }
 
@@ -929,6 +929,7 @@ body:not(.backgrounded) .score-bug.visible {
     flex: 1;
     min-width: 0;
     margin: 0 4px;
+    perspective: 200px;
 }
 
 .player-name {
@@ -969,12 +970,12 @@ body:not(.backgrounded) .score-bug.visible {
 
 .score-flyout {
     position: absolute;
-    bottom: 10px;
-    font-size: 24px;
+    bottom: 60px;
+    font-size: 20px;
     font-weight: 900;
     color: #3c3c3c;
     pointer-events: none;
-    z-index: 2001;
+    z-index: 1999;
     opacity: 0;
     animation: scoreFly 2s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
 }
@@ -1754,7 +1755,7 @@ body:not(.backgrounded) .score-bug.visible {
         opacity: 0.5;
     }
     50%, 90% {
-        transform: scale(1.2);
+        transform: scale(1.1);
         opacity: 0.9;
     }
     70%, 100% {
@@ -1772,7 +1773,6 @@ body:not(.backgrounded) .score-bug.visible {
     border-radius: 15px 15px 0 0;
     font-size: 12px;
     font-weight: 600;
-    pointer-events: none;
     z-index: 999;
     backdrop-filter: blur(8px);
     border: 2px solid rgba(103, 89, 122, 1);
@@ -1826,7 +1826,7 @@ body:not(.backgrounded) .curse-timer.right.active {
     }
 
     .card-content {
-        background: black;
+        background: rgba(0,0,0,0.7);
     }
 
     .card-name,
@@ -2137,7 +2137,7 @@ body:not(.backgrounded) .curse-timer.right.active {
     top: 50%;
     right: 0;
     transform: translateY(-50%);
-    background: rgba(0, 0, 0, 0.9);
+    background: rgba(0, 0, 0, 0.5);
     color: #0f0;
     padding: 15px 8px;
     cursor: pointer;
@@ -2146,6 +2146,11 @@ body:not(.backgrounded) .curse-timer.right.active {
     font-weight: 700;
     font-size: 14px;
     writing-mode: vertical-rl;
+    transition: right 0.3s ease;
+}
+
+.debug-toggle.open {
+    right: min(400px, 90vw);
 }
 
 .debug-section {
