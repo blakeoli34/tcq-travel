@@ -1409,11 +1409,12 @@ function peekDailyDeck($gameId, $playerId) {
             JOIN daily_decks dd ON ddc.deck_id = dd.id
             JOIN cards c ON ddc.card_id = c.id
             WHERE dd.game_id = ? AND dd.player_id = ? AND dd.deck_date = ? 
-            AND ddc.is_used = 0 AND dd.id NOT IN (
-                SELECT DISTINCT deck_id FROM daily_deck_slots dds 
-                WHERE dds.game_id = ? AND dds.player_id = ? AND dds.deck_date = ? AND dds.card_id IS NOT NULL
+            AND ddc.is_used = 0 AND ddc.card_id NOT IN (
+                SELECT dds.card_id FROM daily_deck_slots dds 
+                WHERE dds.game_id = ? AND dds.player_id = ? AND dds.deck_date = ? 
+                AND dds.card_id IS NOT NULL
             )
-            ORDER BY RAND()
+            ORDER BY ddc.id
             LIMIT 3
         ");
         $stmt->execute([$gameId, $playerId, $today, $gameId, $playerId, $today]);

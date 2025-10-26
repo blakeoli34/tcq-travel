@@ -512,7 +512,7 @@ function drawCardToSlot($gameId, $playerId, $slotNumber) {
             JOIN daily_decks dd ON ddc.deck_id = dd.id
             JOIN cards c ON ddc.card_id = c.id
             WHERE dd.game_id = ? AND dd.player_id = ? AND dd.deck_date = ? AND ddc.is_used = 0
-            ORDER BY RAND()
+            ORDER BY ddc.id
             LIMIT 1
         ");
         $stmt->execute([$gameId, $playerId, $today]);

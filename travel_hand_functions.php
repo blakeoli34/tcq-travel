@@ -1054,7 +1054,16 @@ function shuffleDailyDeck($gameId, $playerId) {
         
         $pdo->beginTransaction();
         
-        // Get cards currently in this player's slots
+        // Get deck ID
+        $stmt = $pdo->prepare("SELECT id FROM daily_decks WHERE game_id = ? AND player_id = ? AND deck_date = ?");
+        $stmt->execute([$gameId, $playerId, $today]);
+        $deckId = $stmt->fetchColumn();
+        
+        if (!$deckId) {
+            throw new Exception("No deck found for today");
+        }
+        
+        // Get cards currently in slots
         $stmt = $pdo->prepare("
             SELECT card_id FROM daily_deck_slots 
             WHERE game_id = ? AND player_id = ? AND deck_date = ? AND card_id IS NOT NULL
@@ -1062,21 +1071,40 @@ function shuffleDailyDeck($gameId, $playerId) {
         $stmt->execute([$gameId, $playerId, $today]);
         $slotCards = $stmt->fetchAll(PDO::FETCH_COLUMN);
         
-        // Return slot cards to deck
-        foreach ($slotCards as $cardId) {
-            $stmt = $pdo->prepare("
-                UPDATE daily_deck_cards ddc
-                JOIN daily_decks dd ON ddc.deck_id = dd.id
-                SET ddc.is_used = 0
-                WHERE dd.game_id = ? AND dd.player_id = ? AND dd.deck_date = ? AND ddc.card_id = ?
-            ");
-            $stmt->execute([$gameId, $playerId, $today, $cardId]);
+        // Get all cards with their current status
+        $stmt = $pdo->prepare("
+            SELECT card_id, is_used FROM daily_deck_cards 
+            WHERE deck_id = ?
+            ORDER BY id
+        ");
+        $stmt->execute([$deckId]);
+        $allCardData = $stmt->fetchAll();
+        
+        // Extract just the card IDs for shuffling
+        $allCards = array_column($allCardData, 'card_id');
+        
+        // Create status lookup
+        $cardStatus = array_column($allCardData, 'is_used', 'card_id');
+        
+        // Shuffle the card order
+        shuffle($allCards);
+        
+        // Delete existing deck cards
+        $stmt = $pdo->prepare("DELETE FROM daily_deck_cards WHERE deck_id = ?");
+        $stmt->execute([$deckId]);
+        
+        // Re-insert cards in new shuffled order
+        foreach ($allCards as $cardId) {
+            // Cards in slots become unused, others keep original status
+            $isUsed = in_array($cardId, $slotCards) ? 0 : $cardStatus[$cardId];
+            $stmt = $pdo->prepare("INSERT INTO daily_deck_cards (deck_id, player_id, card_id, is_used) VALUES (?, ?, ?, ?)");
+            $stmt->execute([$deckId, $playerId, $cardId, $isUsed]);
         }
         
         // Clear all slots for this player
         $stmt = $pdo->prepare("
             UPDATE daily_deck_slots 
-            SET card_id = NULL, drawn_at = NULL, completed_at = NULL, completed_by_player_id = NULL
+            SET card_id = NULL, drawn_at = NULL, completed_at = NULL, completed_by_player_id = NULL, curse_activated = 0
             WHERE game_id = ? AND player_id = ? AND deck_date = ?
         ");
         $stmt->execute([$gameId, $playerId, $today]);

@@ -404,6 +404,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 echo json_encode(['success' => false, 'message' => 'Not a digital game']);
                 exit;
             }
+
+            if($gameStatus !== 'active') {
+                echo json_encode(['success' => false, 'message' => 'Game is not active yet']);
+                exit;
+            }
             
             try {
                 $pdo = Config::getDatabaseConnection();
@@ -1656,7 +1661,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     <div class="curse-block-requirement" id="curseBlockRequirement">Complete a snap card to clear this curse</div>
                 </div>
 
-                <div class="daily-deck-count" id="dailyDeckCount" style="display: none;">
+                <div class="daily-deck-count" id="dailyDeckCount">
                     <span id="deckCountText">Cards Remaining: 0</span>
                 </div>
                 

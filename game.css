@@ -154,6 +154,22 @@ body:not(.backgrounded) .game-timer-hand.visible {
     opacity: 1;
 }
 
+.game-timer-hand.increased {
+    animation: handIncreased 1.5s ease-out;
+}
+
+@keyframes handIncreased {
+    0% {
+        transform: translate(-50%, 0) scale(1);
+    }
+    30% {
+        transform: translate(-50%, 50px) scale(1.5);
+    }
+    100% {
+        transform: translate(-50%, 0) scale(1);
+    }
+}
+
 /* Hand Overlay */
 .hand-overlay {
     position: fixed;
@@ -605,6 +621,11 @@ body:not(.backgrounded) .daily-deck-container.loaded {
     padding: 5px;
 }
 
+.daily-slot.disabled {
+    pointer-events: none;
+    opacity: 0.5;
+}
+
 .daily-slot.expanded {
     min-height: 180px;
     background: rgba(0,0,0,0.4);
@@ -632,6 +653,7 @@ body:not(.backgrounded) .daily-deck-container.loaded {
     display: flex;
     flex-direction: column;
     min-height: 130px;
+    transition: all 0.3s ease;
 }
 
 .empty-slot {
@@ -686,6 +708,7 @@ body:not(.backgrounded) .daily-deck-container.loaded {
     padding: 20px;
     background: rgba(255,255,255,0.7);
     border-radius: 20px;
+    transition: all 0.3s ease;
 }
 
 .card-header {
@@ -1737,6 +1760,10 @@ body:not(.backgrounded) .score-bug.visible {
     font-size: 14px;
     font-weight: 600;
     margin-bottom: 15px;
+}
+
+.daily-deck-container.deck-empty .daily-deck-count {
+    display: none;
 }
 
 .daily-slot.loading .card-content,

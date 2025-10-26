@@ -14,6 +14,8 @@ let refreshInterval = null;
 let slideoutTimeout = null;
 let waitCountdownInterval = null;
 let autoCurseInterval = null;
+let isInitialHandLoad = true;
+let previousHandCount = 0;
 
 // Sound management
 let actionSound = new Audio('data:audio/mpeg;base64,SUQzBAAAAAABEVRYWFgAAAAtAAADY29tbWVudABCaWdTb3VuZEJhbmsuY29tIC8gTGFTb25vdGhlcXVlLm9yZwBURU5DAAAAHQAAA1N3aXRjaCBQbHVzIMKpIE5DSCBTb2Z0d2FyZQBUSVQyAAAABgAAAzIyMzUAVFNTRQAAAA8AAANMYXZmNTcuODMuMTAwAAAAAAAAAAAAAAD/80DEAAAAA0gAAAAATEFNRTMuMTAwVVVVVVVVVVVVVUxBTUUzLjEwMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zQsRbAAADSAAAAABVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zQMSkAAADSAAAAABVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV');
@@ -80,6 +82,7 @@ $(document).ready(function() {
             updateDeckCounts();
             updateDailyDeckCount();
             checkDeckEmpty();
+            checkCurseBlock();
         }
         setScorebugWidth();
         $('.score-bug, .game-timer-hand').addClass('visible');
@@ -499,7 +502,14 @@ function updateDailyDeckDisplay(slots) {
             }
         } else {
             slotElement.classList.remove('has-card', 'curse-activated');
-            slotContent.innerHTML = '<div class="empty-slot">TAP TO DRAW A CARD</div>';
+            // Check if there are cards remaining to draw
+            if (dailyDeckData.remainingCards > 0) {
+                slotElement.classList.remove('disabled');
+                slotContent.innerHTML = '<div class="empty-slot">TAP TO DRAW A CARD</div>';
+            } else {
+                slotElement.classList.add('disabled');
+                slotContent.innerHTML = '';
+            }
         }
     });
 
@@ -518,9 +528,12 @@ function updateDailyDeckCount() {
         if (data.success) {
             const countEl = document.getElementById('deckCountText');
             const containerEl = document.getElementById('dailyDeckCount');
-            if (countEl && containerEl) {
+            if (countEl && containerEl && data.remaining > 0) {
                 countEl.textContent = `Cards Remaining: ${data.remaining}`;
-                containerEl.style.display = data.remaining > 0 ? 'block' : 'none';
+            }
+            if(countEl && containerEl && data.remaining == 0) {
+                countEl.textContent = 'No Cards Remaining';
+
             }
         }
     });
@@ -673,6 +686,21 @@ function createSlotCardHTML(slot) {
         </div>
         ${actionsHTML}
     `;
+}
+
+function preserveSlotHeight(slotNumber) {
+    const slots = document.querySelectorAll('.daily-slot');
+    const slot = slots[slotNumber - 1];
+    
+    if (slot) {
+        const currentHeight = slot.offsetHeight;
+        slot.style.minHeight = `${currentHeight}px`;
+        
+        // Remove min-height after empty slot loads
+        setTimeout(() => {
+            slot.style.minHeight = '';
+        }, 100);
+    }
 }
 
 function updateDeckMessage(slots) {
@@ -870,6 +898,13 @@ function updateSlotActionsForModifiers() {
 }
 
 function storeChallenge(slotNumber) {
+    const slotElement = document.querySelector(`.daily-slot[data-slot="${slotNumber}"]`);
+    
+    // Start animation immediately
+    if (slotElement) {
+        animateCardToHand(slotElement);
+    }
+    
     fetch('game.php', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -884,6 +919,13 @@ function storeChallenge(slotNumber) {
             $('.daily-slot[data-slot="' + slotNumber + '"]').removeClass('expanded');
         } else {
             alert('Failed to store challenge: ' + data.message);
+            // Restore card visibility if failed
+            if (slotElement) {
+                const cardContent = slotElement.querySelector('.card-content');
+                if (cardContent) {
+                    cardContent.style.opacity = '1';
+                }
+            }
         }
     });
 }
@@ -905,6 +947,55 @@ function skipChallenge(slotNumber) {
         }
     });
 }
+
+function animateCardToHand(slotElement) {
+    const cardContent = slotElement.querySelector('.card-content');
+    const gameTimerHand = document.querySelector('.game-timer-hand');
+    
+    if (!cardContent || !gameTimerHand) {
+        return;
+    }
+    
+    // Get initial positions
+    const cardRect = cardContent.getBoundingClientRect();
+    const handRect = gameTimerHand.getBoundingClientRect();
+    
+    // Calculate movement distances
+    const deltaX = handRect.left + (handRect.width / 2) - (cardRect.left + (cardRect.width / 2));
+    const deltaY = handRect.top + (handRect.height / 2) - (cardRect.top + (cardRect.height / 2));
+    
+    // Create clone for animation
+    const cardClone = cardContent.cloneNode(true);
+    cardClone.style.position = 'fixed';
+    cardClone.style.top = cardRect.top + 'px';
+    cardClone.style.left = cardRect.left + 'px';
+    cardClone.style.width = cardRect.width + 'px';
+    cardClone.style.height = cardRect.height + 'px';
+    cardClone.style.zIndex = '9999';
+    cardClone.style.pointerEvents = 'none';
+    cardClone.style.transition = 'all 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
+    cardClone.style.transformOrigin = 'center center';
+    
+    // Hide original card
+    cardContent.style.opacity = '0';
+    
+    // Add clone to body
+    document.body.appendChild(cardClone);
+    
+    // Start animation on next frame
+    requestAnimationFrame(() => {
+        cardClone.style.transform = `translate(${deltaX}px, ${deltaY}px) scale(0)`;
+        cardClone.style.opacity = '0';
+    });
+    
+    // Clean up after animation
+    setTimeout(() => {
+        if (cardClone.parentNode) {
+            cardClone.parentNode.removeChild(cardClone);
+        }
+    }, 800);
+}
+
 // Close slot actions when clicking outside
 document.addEventListener('click', function(e) {
     if (!e.target.closest('.daily-slot')) {
@@ -1028,6 +1119,7 @@ function completeChallenge(slotNumber) {
         .then(response => response.json())
         .then(data => {
             if (data.success) {
+                preserveSlotHeight(slotNumber);
                 loadDailyDeck();
             } else {
                 alert('Failed to complete challenge: ' + data.message);
@@ -1051,9 +1143,11 @@ function vetoChallenge(slotNumber) {
         .then(response => response.json())
         .then(data => {
             if (data.success) {
+                preserveSlotHeight(slotNumber);
                 loadDailyDeck();
                 forceRefreshOnce();
                 checkVetoWait();
+                setTimeout(() => { updateHandSlots(), 1000});
             } else {
                 alert('Failed to veto challenge: ' + data.message);
             }
@@ -1210,6 +1304,13 @@ function checkDiceCondition(condition, threshold, die1, die2, total) {
 }
 
 function claimPower(slotNumber) {
+    const slotElement = document.querySelector(`.daily-slot[data-slot="${slotNumber}"]`);
+    
+    // Start animation immediately
+    if (slotElement) {
+        animateCardToHand(slotElement);
+    }
+    
     fetch('game.php', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -1218,12 +1319,18 @@ function claimPower(slotNumber) {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            playSoundIfEnabled('/card-power.m4r');
-            showInAppNotification('Power Claimed!', data.message);
+            preserveSlotHeight(slotNumber);
             loadDailyDeck();
             setTimeout(() => loadHandCards(), 1000);
         } else {
             alert('Failed to claim power: ' + data.message);
+            // Restore card visibility if failed
+            if (slotElement) {
+                const cardContent = slotElement.querySelector('.card-content');
+                if (cardContent) {
+                    cardContent.style.opacity = '1';
+                }
+            }
         }
     });
 }
@@ -1238,11 +1345,21 @@ function activatePower(slotNumber) {
     .then(data => {
         if (data.success) {
             playSoundIfEnabled('/card-power.m4r');
-            loadDailyDeck();
-            setTimeout(() => {
-                refreshGameData();
-                updateStatusEffects();
-            }, 1500);
+            // Animate card content out before removing
+            const slot = document.querySelector(`.daily-slot[data-slot="${slotNumber}"]`);
+            const cardContent = slot?.querySelector('.card-content');
+            if (cardContent) {
+                cardContent.style.transition = 'opacity 0.7s ease, transform 0.7s ease';
+                cardContent.style.opacity = '0';
+                cardContent.style.transform = 'scale(3)';
+                
+                setTimeout(() => {
+                    loadDailyDeck();
+                }, 700);
+            } else {
+                loadDailyDeck();
+            }
+            setTimeout(() => updateStatusEffects(), 1000);
         } else {
             alert('Failed to activate power: ' + data.message);
         }
@@ -1259,6 +1376,7 @@ function discardPower(slotNumber) {
     .then(data => {
         if (data.success) {
             playSoundIfEnabled('/card-vetoed.m4r');
+            preserveSlotHeight(slotNumber);
             loadDailyDeck();
         } else {
             alert('Failed to discard power: ' + data.message);
@@ -1290,6 +1408,7 @@ function completeBattle(slotNumber, isWinner) {
         .then(response => response.json())
         .then(data => {
             if (data.success) {
+                preserveSlotHeight(slotNumber);
                 loadDailyDeck();
             } else {
                 alert('Failed to complete battle: ' + data.message);
@@ -1524,10 +1643,10 @@ function showDeckPeekOverlay(cards, powerName) {
                 ${cards.map(card => `
                     <div style="display: flex; align-items: center; gap: 15px; padding: 15px; background: #f8f9fa; border-radius: 10px;">
                         <div class="card-type-icon ${card.card_category}" style="transform: none;">
-                            <i class="fa-solid ${getCardTypeIcon(card.card_category)}"></i>
+                            <i class="fa-solid ${getCardTypeIconClass(card.card_category)}"></i>
                         </div>
                         <div>
-                            <div style="font-weight: 700; margin-bottom: 5px;">${card.card_name}</div>
+                            <div style="font-weight: 700; margin-bottom: 5px; color: #3c3c3c;">${card.card_name}</div>
                             <div style="font-size: 12px; color: #666;">${card.card_description}</div>
                         </div>
                     </div>
@@ -1550,11 +1669,21 @@ function playPowerCard(playerCardId) {
     .then(data => {
         if (data.success) {
             playSoundIfEnabled('/card-power.m4r');
-            loadHandCards();
-            setTimeout(() => {
-                refreshGameData();
-                updateStatusEffects();
-            }, 1500);
+            // Animate card content out before removing
+            const cardSlot = document.querySelector(`[onclick*="playPowerCard(${playerCardId})"]`)?.closest('.hand-slot');
+            const cardContent = cardSlot?.querySelector('.hand-slot-card');
+            if (cardContent) {
+                cardContent.style.transition = 'opacity 0.7s ease, transform 0.7s ease';
+                cardContent.style.opacity = '0';
+                cardContent.style.transform = 'scale(3)';
+                
+                setTimeout(() => {
+                    loadHandCards();
+                }, 700);
+            } else {
+                loadHandCards();
+            }
+            setTimeout(() => updateStatusEffects(), 1000);
         } else {
             alert('Failed to play power card: ' + data.message);
         }
@@ -1751,6 +1880,19 @@ function updateHandSlots() {
     const totalCards = handCards.reduce((sum, card) => sum + card.quantity, 0);
     if (handCountEl) handCountEl.textContent = totalCards;
 
+    // CHECK FOR HAND COUNT INCREASE AND ADD ANIMATION
+    if (totalCards > previousHandCount && !isInitialHandLoad) {
+        const gameTimerHand = document.querySelector('.game-timer-hand');
+        if (gameTimerHand) {
+            gameTimerHand.classList.add('increased');
+            setTimeout(() => {
+                gameTimerHand.classList.remove('increased');
+            }, 2000);
+        }
+    }
+    previousHandCount = totalCards;
+    isInitialHandLoad = false;
+
     if(gameData.gameStatus === 'active') {
         // Update app badge
         updateAppBadge(totalCards);
@@ -1856,6 +1998,7 @@ function getCardTypeIconClass(type) {
     const icons = {
         'challenge': 'fa-flag-checkered',
         'power': 'fa-star',
+        'curse': 'fa-skull-crossbones',
         'snap': 'fa-camera-retro',
         'spicy': 'fa-pepper-hot'
     };
@@ -2037,7 +2180,7 @@ function showCurseBlockOverlay(curseName, cardType) {
     
     if (overlay && message && requirement) {
         message.innerHTML = '<i class="fa-solid fa-skull-crossbones"></i> ' + curseName;
-        requirement.textContent = `Complete a ${cardType} card to clear this curse`;
+        requirement.textContent = `Complete a ${cardType} card to clear this curse.`;
         overlay.style.display = 'flex';
         
         const container = document.querySelector('.daily-deck-container');
@@ -2531,7 +2674,7 @@ function animateScoreChange(element, newScore) {
     flyout.className = 'score-flyout';
     flyout.textContent = (scoreDiff > 0 ? '+' : '') + scoreDiff;
     flyout.style.cssText = `
-        ${isCurrentPlayer ? 'right: 25%;' : 'left: 25%;'}
+        ${isCurrentPlayer ? 'right: 5%;' : 'left: 5%;'}
     `;
     scoreBug.appendChild(flyout);
     
@@ -3747,6 +3890,7 @@ window.toggleScoreBugExpanded = toggleScoreBugExpanded;
 window.adjustScore = adjustScore;
 window.stealPoints = stealPoints;
 window.drawAllSlots = drawAllSlots;
+window.animateCardToHand = animateCardToHand;
 
 // Dice functions
 window.openDicePopover = openDicePopover;
