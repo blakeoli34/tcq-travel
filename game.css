@@ -116,6 +116,18 @@ body.mountains {
     background: linear-gradient(180deg, #87CEEB 0%, #B8E6FF 50%, #E0F6FF 100%);
 }
 
+.themed-text {
+    display: none;
+}
+
+body.beach .themed-text.beach,
+body.cruise .themed-text.cruise,
+body.hotel .themed-text.hotel,
+body.mountains .themed-text.mountains,
+body.private .themed-text.private {
+    display: block;
+}
+
 .container {
     min-height: 100vh;
     display: flex;

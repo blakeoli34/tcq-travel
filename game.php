@@ -1504,8 +1504,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         ?>
             <!-- Waiting for start date -->
             <div class="waiting-screen start-date-wait">
-                <h2>Adventure Starts Soon!</h2>
-                <p>Your game will begin at 8:00 AM on</p>
+                <h2 class="themed-text cruise">🛳️ All Aboard! Ready to Set Sail?</h2>
+                <h2 class="themed-text hotel">🏨 Checking In? Enjoy Your Stay!</h2>
+                <h2 class="themed-text beach">🏖️ Surf's Up! Ready to Ride The Waves?</h2>
+                <h2 class="themed-text mountains">⛰️ Your Mountain Adventure is On The Horizon!</h2>
+                <h2 class="themed-text private">🏠 Your Private Vacation is About to Get Spicy!</h2>
+                <p>🕗 Your game will begin at 8:00 AM Eastern on</p>
                 <p><strong><?= (new DateTime($gameData['start_date']))->format('F j, Y') ?></strong></p>
                 <div id="startCountdown" style="font-size: 48px; font-weight: 900; margin: 30px 0;"></div>
             </div>
