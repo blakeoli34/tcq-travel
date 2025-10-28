@@ -338,6 +338,9 @@ function deleteGame($gameId) {
         
         $stmt = $pdo->prepare("DELETE FROM player_awards WHERE game_id = ?");
         $stmt->execute([$gameId]);
+
+        $stmt = $pdo->prepare("DELETE FROM completed_cards WHERE game_id = ?");
+        $stmt->execute([$gameId]);
         
         $stmt = $pdo->prepare("DELETE FROM active_curse_effects WHERE game_id = ?");
         $stmt->execute([$gameId]);

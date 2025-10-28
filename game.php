@@ -67,21 +67,28 @@ if ($gameData['status'] === 'active' && $gameData['start_date']) {
     }
 }
 
-// Auto-activate games that have reached their start time
+// Auto-activate games only when both players are ready to start
 if ($gameData['status'] === 'waiting' && $gameData['start_date']) {
     $timezone = new DateTimeZone('America/Indiana/Indianapolis');
     $now = new DateTime('now', $timezone);
     $startDate = new DateTime($gameData['start_date'], $timezone);
     
-    if ($now >= $startDate || $testingMode) {
-        // Activate the game
-        $stmt = $pdo->prepare("UPDATE games SET status = 'active' WHERE id = ?");
+    if (($now >= $startDate || $testingMode)) {
+        // Check if both players are ready to start
+        $stmt = $pdo->prepare("SELECT COUNT(*) FROM players WHERE game_id = ? AND ready_to_start = TRUE");
         $stmt->execute([$player['game_id']]);
-        $gameData['status'] = 'active';
-        $gameStatus = 'active';
+        $readyCount = $stmt->fetchColumn();
         
-        // Initialize Travel Edition
-        initializeTravelEdition($player['game_id']);
+        if ($readyCount >= 2) {
+            // Activate the game
+            $stmt = $pdo->prepare("UPDATE games SET status = 'active' WHERE id = ?");
+            $stmt->execute([$player['game_id']]);
+            $gameData['status'] = 'active';
+            $gameStatus = 'active';
+            
+            // Initialize Travel Edition
+            initializeTravelEdition($player['game_id']);
+        }
     }
 }
 
@@ -145,6 +152,68 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     
     switch ($_POST['action']) {
         // New Travel Edition AJAX endpoints
+        case 'set_ready_to_start':
+            try {
+                $ready = ($_POST['ready'] === 'true') ? 1 : 0;
+                
+                $stmt = $pdo->prepare("UPDATE players SET ready_to_start = ? WHERE device_id = ?");
+                $result = $stmt->execute([$ready, $deviceId]);
+                
+                // Check if both players are ready
+                $stmt = $pdo->prepare("SELECT COUNT(*) FROM players WHERE game_id = ? AND ready_to_start = 1");
+                $stmt->execute([$player['game_id']]);
+                $bothReady = $stmt->fetchColumn() >= 2;
+                
+                echo json_encode(['success' => true, 'both_ready' => $bothReady]);
+            } catch (Exception $e) {
+                error_log("Error in set_ready_to_start: " . $e->getMessage());
+                echo json_encode(['success' => false]);
+            }
+            exit;
+
+        case 'check_ready_status':
+            try {
+                $stmt = $pdo->prepare("SELECT first_name, ready_to_start FROM players WHERE game_id = ?");
+                $stmt->execute([$player['game_id']]);
+                $players = $stmt->fetchAll();
+                
+                $currentReady = false;
+                $opponentReady = false;
+                $opponentName = '';
+                
+                foreach ($players as $p) {
+                    if ($p['first_name'] === $currentPlayer['first_name']) {
+                        $currentReady = $p['ready_to_start'];
+                    } else {
+                        $opponentReady = $p['ready_to_start'];
+                        $opponentName = $p['first_name'];
+                    }
+                }
+                
+                echo json_encode([
+                    'success' => true,
+                    'current_ready' => $currentReady,
+                    'opponent_ready' => $opponentReady,
+                    'opponent_name' => $opponentName,
+                    'both_ready' => $currentReady && $opponentReady
+                ]);
+            } catch (Exception $e) {
+                echo json_encode(['success' => false]);
+            }
+            exit;
+
+        case 'get_game_rules':
+            try {
+                $stmt = $pdo->query("SELECT content FROM game_rules ORDER BY id LIMIT 1");
+                $rules = $stmt->fetch();
+                echo json_encode([
+                    'success' => true, 
+                    'content' => $rules ? $rules['content'] : '<p>No rules have been set yet.</p>'
+                ]);
+            } catch (Exception $e) {
+                echo json_encode(['success' => false, 'content' => '<p>Error loading rules.</p>']);
+            }
+            exit;
         case 'get_daily_deck':
             // Check if game is actually active first
             if ($gameStatus !== 'active') {
@@ -854,7 +923,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             try {
                 $pdo = Config::getDatabaseConnection();
 
-                $status = $start <= new DateTime('now', $timezone) ? 'active' : 'waiting';
+                $status = 'waiting';
 
                 $stmt = $pdo->prepare("
                     UPDATE games 
@@ -979,7 +1048,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $gameId = $player['game_id'];
                 
                 // Get updated game info including mode
-                $stmt = $pdo->prepare("SELECT status, travel_mode_id FROM games WHERE id = ?");
+                $stmt = $pdo->prepare("SELECT status, travel_mode_id, start_date FROM games WHERE id = ?");
                 $stmt->execute([$gameId]);
                 $gameInfo = $stmt->fetch();
                 
@@ -989,6 +1058,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     'success' => true,
                     'status' => $gameInfo['status'],
                     'travel_mode_id' => $gameInfo['travel_mode_id'],
+                    'start_date' => $gameData['start_date'] ?: NULL,
                     'player_count' => count($currentPlayers)
                 ]);
             } catch (Exception $e) {
@@ -1509,12 +1579,81 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 <h2 class="themed-text beach">🏖️ Surf's Up! Ready to Ride The Waves?</h2>
                 <h2 class="themed-text mountains">⛰️ Your Mountain Adventure is On The Horizon!</h2>
                 <h2 class="themed-text private">🏠 Your Private Vacation is About to Get Spicy!</h2>
-                <p>🕗 Your game will begin at 8:00 AM Eastern on</p>
-                <p><strong><?= (new DateTime($gameData['start_date']))->format('F j, Y') ?></strong></p>
+                <p>🕗 Your game will begin at 8:00 AM Eastern on <strong><?= (new DateTime($gameData['start_date']))->format('F j, Y') ?></strong>!</p>
                 <div id="startCountdown" style="font-size: 48px; font-weight: 900; margin: 30px 0;"></div>
+
+                <script>
+                function updateStartCountdown() {
+                    <?php 
+                    $startDateTime = new DateTime($gameData['start_date'], new DateTimeZone('America/Indiana/Indianapolis'));
+                    $startDateTime->setTime(8, 0, 0);
+                    $startIso = $startDateTime->format('c');
+                    ?>
+                    const startDate = new Date('<?= $startIso ?>');
+                    const now = new Date();
+                    const diff = startDate - now;
+                    
+                    if (diff <= 0) {
+                        window.location.reload();
+                        return;
+                    }
+                    
+                    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+                    const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+                    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+                    const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+                    
+                    let timeString = '';
+                    if (days > 0) {
+                        timeString += `${days}d `;
+                    }
+                    if (days > 0 || hours > 0) {
+                        timeString += `${hours}h `;
+                    }
+                    timeString += `${minutes}m ${seconds}s`;
+                    
+                    document.getElementById('startCountdown').textContent = timeString;
+                }
+
+                updateStartCountdown();
+                const countdownInterval = setInterval(updateStartCountdown, 1000);
+                window.addEventListener('beforeunload', () => clearInterval(countdownInterval));
+                </script>
+                <div class="game-info">
+                    <a href="#" onclick="showRulesModal()" class="rules-link">View Game Rules</a>
+                </div>
             </div>
             
-        <?php endif; // Close the $now < $startDate check
+        <?php else:
+            // Check if both players are ready to start
+            $stmt = $pdo->prepare("SELECT COUNT(*) FROM players WHERE game_id = ? AND ready_to_start = 1");
+            $stmt->execute([$player['game_id']]);
+            $readyCount = $stmt->fetchColumn();
+            
+            if ($readyCount < 2):
+        ?>
+        <!-- Ready to Start Screen -->
+        <div class="ready-start-screen">
+            <h2 class="themed-text cruise">🛳️ Ready to Set Sail?</h2>
+            <h2 class="themed-text hotel">🏨 Ready to Check In?</h2>
+            <h2 class="themed-text beach">🏖️ Ready to Hit the Beach?</h2>
+            <h2 class="themed-text mountains">⛰️ Ready for Adventure?</h2>
+            <h2 class="themed-text private">🏠 Ready to Get Spicy?</h2>
+            
+            <div id="readyStatus" class="ready-status">
+                <p>Press and hold the button when you're ready to start!</p>
+            </div>
+            
+            <button id="readyButton" class="ready-start-button">
+                <span>Hold to Start</span>
+            </button>
+            
+            <div class="game-info">
+                <a href="#" onclick="showRulesModal()" class="rules-link">View Game Rules</a>
+            </div>
+        </div>
+
+        <?php endif; endif; // Close the $readyCount and start date checks
         elseif ($gameStatus === 'completed'): ?>
             <!-- Game ended -->
             <?php 

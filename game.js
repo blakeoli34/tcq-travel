@@ -37,6 +37,10 @@ $(document).ready(function() {
             $(document).off('click');
         }
     });
+
+    if (document.querySelector('.ready-start-screen')) {
+        initializeReadyToStart();
+    }
     
     // Get game data from PHP
     if (typeof window.gameDataFromPHP !== 'undefined') {
@@ -239,6 +243,154 @@ function checkGameStatus() {
     .catch(error => {
         console.error('Error checking game status:', error);
     });
+}
+
+// Ready to Start functionality
+function initializeReadyToStart() {
+    const button = document.getElementById('readyButton');
+    if (!button) return;
+    
+    let isPressed = false;
+    
+    function startPress(e) {
+        e.preventDefault();
+        if (!isPressed) {
+            isPressed = true;
+            setReadyStatus(true);
+        }
+    }
+    
+    function endPress(e) {
+        e.preventDefault();
+        if (isPressed) {
+            isPressed = false;
+            setReadyStatus(false);
+        }
+    }
+    
+    // Mouse events
+    button.addEventListener('mousedown', startPress);
+    button.addEventListener('mouseup', endPress);
+    button.addEventListener('mouseleave', endPress);
+    
+    // Touch events
+    button.addEventListener('touchstart', startPress);
+    button.addEventListener('touchend', endPress);
+    button.addEventListener('touchcancel', endPress);
+    
+    // Global events to catch releases outside button
+    document.addEventListener('mouseup', endPress);
+    document.addEventListener('touchend', endPress);
+    
+    // Start status checking
+    const statusInterval = setInterval(checkReadyStatus, 500);
+    window.addEventListener('beforeunload', () => clearInterval(statusInterval));
+}
+
+function setReadyStatus(ready) {
+    const button = document.getElementById('readyButton');
+    if (ready) {
+        button.classList.add('pressed');
+    } else {
+        button.classList.remove('pressed');
+    }
+    
+    fetch('game.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: `action=set_ready_to_start&ready=${ready}`
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success && data.both_ready) {
+            startGame();
+        }
+    })
+    .catch(error => {
+        console.error('AJAX error:', error);
+    });
+}
+
+function checkReadyStatus() {
+    fetch('game.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'action=check_ready_status'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            const statusEl = document.getElementById('readyStatus');
+            const button = document.getElementById('readyButton');
+            
+            if (data.both_ready) {
+                statusEl.innerHTML = '<p>🚀 Starting Game...</p>';
+                statusEl.className = 'ready-status both-ready';
+                button.classList.add('both-ready');
+                setTimeout(() => window.location.reload(), 2000);
+            } else if (data.opponent_ready) {
+                statusEl.innerHTML = `<p>${data.opponent_name} is ready! Hold your button to start!</p>`;
+                statusEl.className = 'ready-status opponent-ready';
+            } else {
+                statusEl.innerHTML = '<p>Press and hold the button when you\'re ready to start!</p>';
+                statusEl.className = 'ready-status';
+            }
+        }
+    });
+}
+
+function startGame() {
+    const statusEl = document.getElementById('readyStatus');
+    const button = document.getElementById('readyButton');
+    
+    statusEl.innerHTML = '<p>🚀 Starting Game...</p>';
+    statusEl.className = 'ready-status both-ready';
+    button.classList.add('both-ready');
+    
+    setTimeout(() => {
+        window.location.reload();
+    }, 2000);
+}
+
+// Rules Modal
+function showRulesModal() {
+    fetch('game.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'action=get_game_rules'
+    })
+    .then(response => response.json())
+    .then(data => {
+        const modal = document.createElement('div');
+        modal.className = 'rules-modal';
+        modal.innerHTML = `
+            <div class="rules-modal-content">
+                <div class="rules-modal-header">
+                    <h2 class="rules-modal-title">Game Rules</h2>
+                    <button class="rules-close" onclick="closeRulesModal()">&times;</button>
+                </div>
+                <div class="rules-content">
+                    ${data.content}
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(modal);
+        setTimeout(() => modal.classList.add('active'), 10);
+        
+        // Close on background click
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) closeRulesModal();
+        });
+    });
+}
+
+function closeRulesModal() {
+    const modal = document.querySelector('.rules-modal');
+    if (modal) {
+        modal.classList.remove('active');
+        setTimeout(() => modal.remove(), 300);
+    }
 }
 
 // ========================================
@@ -3184,7 +3336,7 @@ function setupWaitingScreenPolling() {
             })
             .then(response => response.json())
             .then(data => {
-                if (data.success && data.status !== 'waiting') {
+                if (data.success && data.status !== 'waiting' || data.success && data.start_date) {
                     window.location.reload();
                 }
             })
@@ -3195,35 +3347,6 @@ function setupWaitingScreenPolling() {
         
         const statusInterval = setInterval(checkForStatusChange, 5000);
         window.addEventListener('beforeunload', () => clearInterval(statusInterval));
-    }
-
-    // Waiting for start date
-    if (document.querySelector('.waiting-screen.start-date-wait')) {
-        console.log('Starting countdown to game start...');
-        
-        function updateStartCountdown() {
-            // Parse PHP date and add 8am time
-            const startDate = new Date(gameData.startDate.replace(' ', 'T'));
-            const now = new Date();
-            const diff = startDate - now;
-            
-            if (diff <= 0) {
-                window.location.reload();
-                return;
-            }
-            
-            const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-            const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-            const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-            const seconds = Math.floor((diff % (1000 * 60)) / 1000);
-            
-            document.getElementById('startCountdown').textContent = 
-                `${days}d ${hours}h ${minutes}m ${seconds}s`;
-        }
-        
-        updateStartCountdown();
-        const countdownInterval = setInterval(updateStartCountdown, 1000);
-        window.addEventListener('beforeunload', () => clearInterval(countdownInterval));
     }
 }
 
