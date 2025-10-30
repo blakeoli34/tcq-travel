@@ -1372,7 +1372,7 @@ function vetoStoredChallenge(playerCardId) {
 }
 
 function activateCurse(slotNumber) {
-
+    clearInterval(autoCurseInterval);
     // Get card data to check if dice roll needed
     const slot = dailyDeckData.slots[slotNumber - 1];
     // Handle dice roll requirement BEFORE backend call
