@@ -75,7 +75,7 @@ if ($gameData['status'] === 'waiting' && $gameData['start_date']) {
     
     if (($now >= $startDate || $testingMode)) {
         // Check if both players are ready to start
-        $stmt = $pdo->prepare("SELECT COUNT(*) FROM players WHERE game_id = ? AND ready_to_start = TRUE");
+        $stmt = $pdo->prepare("SELECT COUNT(*) FROM players WHERE game_id = ? AND ready_to_start = 1");
         $stmt->execute([$player['game_id']]);
         $readyCount = $stmt->fetchColumn();
         
@@ -88,6 +88,13 @@ if ($gameData['status'] === 'waiting' && $gameData['start_date']) {
             
             // Initialize Travel Edition
             initializeTravelEdition($player['game_id']);
+        } else {
+            if($testingMode) {
+                $stmt = $pdo->prepare("UPDATE players SET ready_to_start = 1 WHERE game_id = ?");
+                $stmt->execute([$player['game_id']]);
+                header('Location: game.php');
+                exit;
+            }
         }
     }
 }
@@ -1700,7 +1707,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 <div class="confetti"></div>
                 <?php if ($winner): ?>
                     <div class="winner <?= $winner['gender'] ?>">
-                        🎉 <?= htmlspecialchars($winner['first_name']) ?> Wins! 🎉
+                        🎉 <?= htmlspecialchars($winner['first_name']) ?> Won! 🎉
                     </div>
                     <p>Final Score: <?= $winner['score'] ?>-<?= $loser['score'] ?></p>
                 <?php else: ?>

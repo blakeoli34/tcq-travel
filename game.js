@@ -1163,6 +1163,14 @@ document.addEventListener('click', function(e) {
     }
 });
 
+function setBodyClass(className, shouldAdd) {
+    if (shouldAdd) {
+        document.body.classList.add(className);
+    } else {
+        document.body.classList.remove(className);
+    }
+}
+
 // ========================================
 // CARD ACTIONS
 // ========================================
@@ -1177,6 +1185,9 @@ function updateCardModifiers() {
     .then(data => {
         if (data.success) {
             addModifierBadges(data.modifiers);
+            // Check for veto skip power and update body class
+            const hasVetoSkip = data.modifiers.some(m => m.veto_modify === 'skip');
+            setBodyClass('no-veto', hasVetoSkip);
         }
     });
 }

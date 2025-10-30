@@ -189,11 +189,11 @@ body:not(.backgrounded) .game-timer-hand.visible {
     left: 0;
     width: 100%;
     height: calc(100vh + 20px);
-    background: rgba(34,34,34,0.7);
+    background: rgba(34,34,34,0.2);
     backdrop-filter: blur(8px);
     z-index: 2000;
     transform: translateY(-100%);
-    transition: transform 0.4s cubic-bezier(0.2, 0.8, 0.3, 1.1);
+    transition: all 0.4s cubic-bezier(0.2, 0.8, 0.3, 1.1);
     padding-top: 20px;
     overflow: hidden;
 }
@@ -380,6 +380,10 @@ body:not(.backgrounded) .game-timer-hand.visible {
 .hand-slot-card-badge.penalty {
     background: rgba(198, 40, 40, 0.2);
     color: #c62828;
+}
+
+body.no-veto .hand-slot-card-badge.penalty {
+    display: none;
 }
 
 .hand-slot-card-quantity {
@@ -803,6 +807,10 @@ body:not(.backgrounded) .daily-deck-container.loaded {
 .card-badge.penalty {
     background: rgba(198, 40, 40, 0.2);
     color: #c62828;
+}
+
+body.no-veto .card-badge.penalty {
+    display: none;
 }
 
 .card-badge.auto-activate {
@@ -2044,6 +2052,14 @@ body:not(.backgrounded) .curse-timer.right.active {
         background: transparent linear-gradient(180deg, #07253D 0%, #1C6077 44%, #6CA3B7 71%, #0D1F2B 88%, #02101B 100%) 0% 0% no-repeat padding-box;
     }
 
+    .hand-overlay {
+        background: transparent;
+    }
+
+    .deck-option {
+        background: rgba(0,0,0,0.1);
+    }
+
     .score-bug {
         background: rgba(25,25,25,0.7);
         border-color: #222;
@@ -2055,12 +2071,15 @@ body:not(.backgrounded) .curse-timer.right.active {
         color: #e6e6e6;
     }
 
-    .card-content {
+    .card-content,
+    .hand-slot-card {
         background: rgba(0,0,0,0.7);
     }
 
     .card-name,
     .card-description,
+    .hand-slot-card-name,
+    .hand-slot-card-description,
     .player-score,
     .player-name,
     .score-divider,
