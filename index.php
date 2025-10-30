@@ -4,6 +4,8 @@ require_once 'config.php';
 require_once 'functions.php';
 require_once 'auth.php';
 
+$inviteCode = '';
+
 // Check if user is already authenticated
 $player = getAuthenticatedPlayer();
 if ($player) {
@@ -31,6 +33,10 @@ if ($_POST) {
             $error = $result['message'];
         }
     }
+}
+
+if(isset($_GET['invite']) && $_GET['invite'] !== '') {
+    $inviteCode = $_GET['invite'];
 }
 ?>
 <!DOCTYPE html>
@@ -234,7 +240,7 @@ if ($_POST) {
             <div class="form-group">
                 <label for="invite_code">Invite Code</label>
                 <input type="text" id="invite_code" name="invite_code" required 
-                       maxlength="6" style="text-transform: uppercase;">
+                       maxlength="6" style="text-transform: uppercase;" <?php if($inviteCode !== '') { echo 'value="' . $inviteCode .'"'; } ?>>
             </div>
             
             <div class="form-group">

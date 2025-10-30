@@ -120,7 +120,7 @@ function calculateSnapAward($snapCount) {
     // Award structure for snap cards
     $awards = [
         5 => 10,
-        10 => 25,
+        12 => 25,
         25 => 75
     ];
     
@@ -131,7 +131,7 @@ function calculateSpicyAward($spicyCount) {
     // Award structure for spicy cards
     $awards = [
         5 => 15,
-        10 => 50,
+        12 => 50,
         25 => 100
     ];
     
@@ -282,7 +282,7 @@ function getPlayerAwards($gameId, $playerId) {
 }
 
 function getNextSnapAwardLevel($currentCount) {
-    $levels = [5, 10, 25];
+    $levels = [5, 12, 25];
     
     foreach ($levels as $level) {
         if ($currentCount < $level) {
@@ -298,7 +298,7 @@ function getNextSnapAwardLevel($currentCount) {
 }
 
 function getNextSpicyAwardLevel($currentCount) {
-    $levels = [5, 10, 25];
+    $levels = [5, 12, 25];
     
     foreach ($levels as $level) {
         if ($currentCount < $level) {

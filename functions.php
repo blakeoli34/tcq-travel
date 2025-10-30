@@ -889,7 +889,7 @@ function resetGameForNewRound($gameId) {
         $pdo->beginTransaction();
         
         // Reset players: scores to 0, ready status to false
-        $stmt = $pdo->prepare("UPDATE players SET score = 0, ready_for_new_game = FALSE, veto_wait_until = NULL WHERE game_id = ?");
+        $stmt = $pdo->prepare("UPDATE players SET score = 0, ready_for_new_game = FALSE, veto_wait_until = NULL, ready_to_start = 0 WHERE game_id = ?");
         $stmt->execute([$gameId]);
         
         // Reset game: status to waiting, clear dates, mode and duration

@@ -354,6 +354,7 @@ body:not(.backgrounded) .game-timer-hand.visible {
     color: #666;
     line-height: 1.3;
     flex: 1;
+    text-wrap-style: pretty;
 }
 
 .hand-slot-card-meta {
@@ -771,6 +772,7 @@ body:not(.backgrounded) .daily-deck-container.loaded {
     line-height: 1.4;
     flex: 1;
     width: 100%;
+    text-wrap-style: pretty;
 }
 
 .card-meta {
@@ -1175,7 +1177,7 @@ body:not(.backgrounded) .score-bug.visible {
     width: 100%;
     max-width: 500px;
     margin: 0 auto;
-    padding: 30px 20px 0 20px;
+    padding: 48px 20px 0 20px;
     transform: scaleY(0);
     transform-origin: bottom;
     opacity: 0;
@@ -1492,6 +1494,7 @@ body:not(.backgrounded) .score-bug.visible {
     font-weight: 600;
     cursor: pointer;
     margin-bottom: 10px;
+    text-decoration: none;
 }
 
 .btn:disabled {
@@ -1878,15 +1881,18 @@ body:not(.backgrounded) .score-bug.visible {
     color: var(--color-blue);
     margin-top: 20px;
     margin-bottom: 10px;
+    text-wrap-style: pretty;
 }
 
 .rules-content p {
     margin-bottom: 15px;
+    text-wrap-style: pretty;
 }
 
 .rules-content ul, .rules-content ol {
     margin-bottom: 15px;
     padding-left: 20px;
+    text-wrap-style: pretty;
 }
 
 /* Game Ended */
@@ -2309,6 +2315,14 @@ body:not(.backgrounded) .curse-timer.right.active {
     color: #3c3c3c;
 }
 
+.rules-section {
+    position: absolute;
+    top: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: #3c3c3c;
+}
+
 .sound-toggle-section {
     position: absolute;
     top: 16px;
@@ -2334,7 +2348,8 @@ body:not(.backgrounded) .curse-timer.right.active {
     }
 
     .dice-roller-section,
-    .sound-toggle-section {
+    .sound-toggle-section,
+    .rules-section {
         color: #e2e2e2;
     }
     

@@ -1470,15 +1470,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         <div class="cloud cloud-6"></div>
     </div>
     <div class="container">
-        <?php if ($gameStatus === 'waiting' && count($players) < 2): ?>
+        <?php if ($gameStatus === 'waiting' && count($players) < 2):
+            $textLink = "https://travel.thecouples.quest/?invite=" . $player['invite_code'] . "\nJoin your game with " . $player['first_name'] . " by following this link and installing the TCQ Travel app!"; ?>
             <!-- Waiting for other player -->
             <div class="waiting-screen no-opponent">
                 <h2>Waiting for Opponent</h2>
                 <p>Share your invite code with your opponent to start the game!</p>
                 <p><strong>Invite Code: <?= htmlspecialchars($player['invite_code']) ?></strong></p>
+                <a href="sms://?body=<?= rawurlencode($textLink) ?>" class="btn"><i class="fa-solid fa-comment"></i> Send Invite Link</a>
                 <div class="notify-bubble" style="margin-top: 30px; padding: 20px; border-radius: 15px;">
                     <h3 style="margin-bottom: 15px;">🔔 Enable Notifications</h3>
-                    <p style="margin-bottom: 15px; font-size: 14px;">Get notified when your partner bumps you or when timers expire!</p>
+                    <p style="margin-bottom: 15px; font-size: 14px;">Notifications help to keep you aware of what is happening in the game. You won't know what your opponent is doing without being notified.</p>
                     <button id="enableNotificationsBtn" class="btn" onclick="enableNotifications()">
                         Enable Notifications
                     </button>
@@ -1515,7 +1517,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             <div class="waiting-screen duration">
                 <div class="notify-bubble" style="margin-bottom: 30px; padding: 20px; border-radius: 15px;">
                     <h3 style="margin-bottom: 15px;">🔔 Enable Notifications</h3>
-                    <p style="margin-bottom: 15px; font-size: 14px;">Get notified when your partner bumps you or when timers expire!</p>
+                    <p style="margin-bottom: 15px; font-size: 14px;">Notifications help to keep you aware of what is happening in the game. You won't know what your opponent is doing without being notified.</p>
                     <button id="enableNotificationsBtn" class="btn" onclick="enableNotifications()">
                         Enable Notifications
                     </button>
@@ -1569,18 +1571,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $timezone = new DateTimeZone('America/Indiana/Indianapolis');
             $now = new DateTime('now', $timezone);
             $startDate = new DateTime($gameData['start_date'], $timezone);
+            $daylightCheck = $now->format('I');
+            $timezoneName = 'EST';
+            if($daylightCheck === '1') {
+                $timezoneName = 'EDT';
+            }
             
             if ($now < $startDate):
         ?>
             <!-- Waiting for start date -->
             <div class="waiting-screen start-date-wait">
+                <div class="notify-bubble" style="margin-bottom: 30px; padding: 20px; border-radius: 15px;">
+                    <h3 style="margin-bottom: 15px;">🔔 Enable Notifications</h3>
+                    <p style="margin-bottom: 15px; font-size: 14px;">Notifications help to keep you aware of what is happening in the game. You won't know what your opponent is doing without being notified.</p>
+                    <button id="enableNotificationsBtn" class="btn" onclick="enableNotifications()">
+                        Enable Notifications
+                    </button>
+                    <div id="notificationStatus" style="margin-top: 10px; font-size: 14px;"></div>
+                </div>
                 <h2 class="themed-text cruise">🛳️ All Aboard! Ready to Set Sail?</h2>
                 <h2 class="themed-text hotel">🏨 Checking In? Enjoy Your Stay!</h2>
                 <h2 class="themed-text beach">🏖️ Surf's Up! Ready to Ride The Waves?</h2>
                 <h2 class="themed-text mountains">⛰️ Your Mountain Adventure is On The Horizon!</h2>
                 <h2 class="themed-text private">🏠 Your Private Vacation is About to Get Spicy!</h2>
-                <p>🕗 Your game will begin at 8:00 AM Eastern on <strong><?= (new DateTime($gameData['start_date']))->format('F j, Y') ?></strong>!</p>
-                <div id="startCountdown" style="font-size: 48px; font-weight: 900; margin: 30px 0;"></div>
+                <p>🕗 Your game will begin at 8:00am <?= $timezoneName ?> on <strong><?= (new DateTime($gameData['start_date']))->format('F j, Y') ?></strong>.</p>
+                <div id="startCountdown" style="font-size: 40px; font-weight: 900; margin: 30px 0;"></div>
 
                 <script>
                 function updateStartCountdown() {
@@ -1634,6 +1649,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         ?>
         <!-- Ready to Start Screen -->
         <div class="ready-start-screen">
+            <div class="notify-bubble" style="margin-bottom: 30px; padding: 20px; border-radius: 15px;">
+                <h3 style="margin-bottom: 15px;">🔔 Enable Notifications</h3>
+                <p style="margin-bottom: 15px; font-size: 14px;">Notifications help to keep you aware of what is happening in the game. You won't know what your opponent is doing without being notified.</p>
+                <button id="enableNotificationsBtn" class="btn" onclick="enableNotifications()">
+                    Enable Notifications
+                </button>
+                <div id="notificationStatus" style="margin-top: 10px; font-size: 14px;"></div>
+            </div>
             <h2 class="themed-text cruise">🛳️ Ready to Set Sail?</h2>
             <h2 class="themed-text hotel">🏨 Ready to Check In?</h2>
             <h2 class="themed-text beach">🏖️ Ready to Hit the Beach?</h2>
@@ -1837,7 +1860,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                         <div class="sound-toggle-section">
                             <i class="fa-solid fa-volume-high" id="soundToggleIcon" onclick="event.stopPropagation(); toggleSound()"></i>
                         </div>
-                        <!-- Dice Roller -->
+                        <div class="rules-section">
+                            <i class="fa-solid fa-circle-info" onclick="event.stopPropagation(); showRulesModal();"></i>
+                        </div>
                         <div class="dice-roller-section">
                             <i class="fa-solid fa-dice" onclick="event.stopPropagation(); openDicePopover()"></i>
                         </div>

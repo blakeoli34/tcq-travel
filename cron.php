@@ -78,7 +78,7 @@ function sendDailyNotifications() {
         $timezone = new DateTimeZone('America/Indiana/Indianapolis');
         $now = new DateTime('now', $timezone);
         
-        // Activate games that have reached their start time
+        // Notify games that are ready to go
         $stmt = $pdo->query("
             SELECT id FROM games 
             WHERE status = 'waiting' 
@@ -87,12 +87,24 @@ function sendDailyNotifications() {
         ");
         $gamesToActivate = $stmt->fetchAll(PDO::FETCH_COLUMN);
 
+        if($gamesToActivate) {
+            error_log('Found ' . count($gamesToActivate) . ' game(s) ready to go');
+        }
+
         foreach ($gamesToActivate as $gameId) {
-            $stmt = $pdo->prepare("UPDATE games SET status = 'active' WHERE id = ?");
+            error_log('Gathering players for game ' . $gameId);
+            $stmt = $pdo->prepare("
+                SELECT fcm_token FROM players
+                WHERE game_id = ?
+            ");
             $stmt->execute([$gameId]);
-            
-            // Initialize Travel Edition for this game
-            initializeTravelEdition($gameId);
+            $tokens = $stmt->fetchAll();
+            if($tokens) {
+                error_log('Found ' . count($tokens) . ' players with notifications enabled. Sending notifications now.');
+            }
+            foreach($tokens as $token) {
+                sendPushNotification($token['fcm_token'], '🚨 Ready to Play!', 'Your travel game is ready to play, enjoy your vacation!');
+            }
         }
         
         // Get players in active digital games that started today or earlier
@@ -161,6 +173,27 @@ function sendDailyNotifications() {
 
 function endOfDayNotification() {
     $pdo = Config::getDatabaseConnection();
+
+    // Re-notify games that are ready to go
+    $stmt = $pdo->query("
+        SELECT id FROM games 
+        WHERE status = 'waiting' 
+        AND start_date IS NOT NULL 
+        AND start_date <= NOW()
+    ");
+    $gamesToActivate = $stmt->fetchAll(PDO::FETCH_COLUMN);
+
+    foreach ($gamesToActivate as $gameId) {
+        $stmt = $pdo->prepare("
+            SELECT fcm_token FROM players
+            WHERE game_id = ?
+        ");
+        $stmt->execute([$gameId]);
+        $tokens = $stmt->fetchAll();
+        foreach($tokens as $token) {
+            sendPushNotification($token['fcm_token'], 'Reminder', 'Your travel game is ready to play, you still have 3 hours to play today!');
+        }
+    }
     // Get players in active digital games that started today or earlier
     $stmt = $pdo->query("
         SELECT g.id as game_id, g.start_date, g.end_date,
